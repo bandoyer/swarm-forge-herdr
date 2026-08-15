@@ -21,11 +21,15 @@
   and is the durable record herdr's live-only states cannot provide."
   [id event detail]
   (fs/create-dirs (squad-dir))
-  (spit (str (fs/path (squad-dir) "events.log"))
-        (str (handoff-lib/iso-now) " " id " " event
-             (when-not (str/blank? detail) (str " " detail))
-             "\n")
-        :append true))
+  ;; One event = one line: fold newlines out of caller-supplied detail so a
+  ;; hostile value (a reject reason, a template name) cannot forge extra
+  ;; audit-log lines.
+  (let [detail (some-> detail (str/replace #"[\r\n]+" " "))]
+    (spit (str (fs/path (squad-dir) "events.log"))
+          (str (handoff-lib/iso-now) " " id " " event
+               (when-not (str/blank? detail) (str " " detail))
+               "\n")
+          :append true)))
 
 (defn read-record
   "Record EDN from file, or die 1 '<missing-token>: <id>' when absent."

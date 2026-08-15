@@ -537,18 +537,10 @@ grep -A3 '^NEXT_ACTION: wait-capacity$' <<<"$OUT" | grep -q 'TARGET: pc2' \
   || { echo "$OUT"; fail "exactly one spawn should be advised for one free slot"; }
 ok "one slot, two requests: first spawns, second waits"
 
-# --- reviewer findings (squad-advisor review) -------------------------------
-# Each block below is a failing test for an open defect; disabled so the
-# suite stays green. Run with SMOKE_FINDINGS=1 to watch them fail; the
-# coder's fix removes the gate.
-if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
-
-step "FINDING: spawn-request create accepts a replaced (retired) assignment"
-# squad_spawn_request.bb create checks only (= :created state), but
+step "spawn-request: a replaced (retired) assignment is refused"
 # squad_assign replace! keeps the old record's state, so a replaced
-# :created assignment passes the gate and the request is born stale —
-# contradicting the script's own header claim that a stale request "can
-# only arise from lifecycle movement after the fact".
+# :created assignment would otherwise pass the :created gate and the
+# request would be born stale (reviewer finding, squad-advisor).
 "$SCRIPTS/squad_assign.sh" create fr1 implementer pc.md > /dev/null
 "$SCRIPTS/squad_assign.sh" replace fr1 fr2 implementer pc.md > /dev/null
 set +e
@@ -557,24 +549,36 @@ STATUS=$?
 set -e
 [ "$STATUS" -eq 2 ] \
   || { echo "$OUT"; fail "spawn-request for a replaced assignment should be refused (exit 2), got $STATUS"; }
-ok "replaced assignment cannot request a spawn"
+expect "replaced assignment token" "ASSIGNMENT_REPLACED: 'fr1' was replaced by fr2" <<<"$OUT"
 
-step "FINDING: unvalidated template forges events.log lines"
-# The template argument flows raw into log-event! detail; a newline in it
-# appends an attacker-chosen line to the durable audit log. Ids are
-# validated before path resolution — templates deserve the same gate (they
-# also become daemon spawn arguments in slice B).
+step "spawn-request: hostile template cannot forge events.log lines"
+# The template becomes log-event! detail and, in slice B, daemon spawn
+# arguments; its shape is gated like assignment ids (reviewer finding,
+# squad-advisor).
 "$SCRIPTS/squad_assign.sh" create fr3 implementer pc.md > /dev/null
 set +e
-"$SCRIPTS/squad_spawn_request.sh" create fr3 \
-  "$(printf 'implementer\n2026-01-01T00:00:00Z fr3 accepted FORGED')" > /dev/null 2>&1
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create fr3 \
+  "$(printf 'implementer\n2026-01-01T00:00:00Z fr3 accepted FORGED')" 2>&1)"
+STATUS=$?
 set -e
+[ "$STATUS" -eq 2 ] || { echo "$OUT"; fail "hostile template should exit 2, got $STATUS"; }
+expect "hostile template token" "INVALID_TEMPLATE" <<<"$OUT"
 if grep -q 'FORGED' .swarmforge/squad/events.log; then
   fail "hostile template must not forge an events.log line"
 fi
 ok "template cannot forge audit-log lines"
 
+step "events.log: newlines in free-text detail are folded to one line"
+# Reject reasons stay free text, so log-event! itself must keep one event
+# on one line even when the reason embeds a forged timestamped line.
+"$SCRIPTS/squad_assign.sh" result fr3 pc.md > /dev/null
+"$SCRIPTS/squad_assign.sh" reject fr3 \
+  "$(printf 'bad work\n2026-01-01T00:00:00Z fr3 accepted FORGED2')" > /dev/null
+grep -q 'FORGED2' .swarmforge/squad/events.log || fail "reject reason not logged"
+if grep -q '^2026-01-01T00:00:00Z fr3 accepted FORGED2' .swarmforge/squad/events.log; then
+  fail "newline in reject reason forged an events.log line"
 fi
+ok "free-text detail cannot forge audit-log lines"
 cd "$CODER"
 
 echo

@@ -37,11 +37,22 @@
 (defn create! [assignment-id template]
   (let [file (request-file assignment-id)
         status-file (squad-lib/status-file assignment-id)]
+    ;; Templates become audit-log detail and, in slice B, daemon spawn
+    ;; arguments — gate their shape like assignment ids (reviewer finding,
+    ;; squad-advisor: a newline in the template could forge log lines).
+    (when-not (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" (str template))
+      (handoff-lib/die 2 (str "INVALID_TEMPLATE: " template)))
     (when (fs/exists? file)
       (handoff-lib/die 2 (str "SPAWN_REQUEST_EXISTS: " assignment-id)))
     (when-not (fs/exists? status-file)
       (handoff-lib/die 2 (str "NO_SUCH_ASSIGNMENT: " assignment-id)))
-    (let [{:keys [state]} (edn/read-string (slurp (str status-file)))]
+    (let [{:keys [state replaced-by]} (edn/read-string (slurp (str status-file)))]
+      ;; replace! keeps the old record's state, so a replaced assignment
+      ;; can still read :created; it is retired work and must not spawn
+      ;; (reviewer finding, squad-advisor).
+      (when replaced-by
+        (handoff-lib/die 2 (format "ASSIGNMENT_REPLACED: '%s' was replaced by %s; request a spawn for the replacement"
+                                   assignment-id replaced-by)))
       (when-not (= :created state)
         (handoff-lib/die 2 (format "ASSIGNMENT_NOT_CREATED: '%s' is %s; only a created assignment can request a spawn"
                                    assignment-id (name state)))))
