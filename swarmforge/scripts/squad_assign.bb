@@ -8,53 +8,36 @@
 ;;   events.log                       append-only timestamped state changes
 ;;
 ;; Lifecycle: created -> spawned -> result -> accepted | rejected (-> merged).
-;; This tool owns created/result/accepted/rejected and replacement links;
-;; the spawner writes spawned and the daemon writes merged (S3). Illegal
-;; transitions exit 2 with an INVALID_TRANSITION token.
+;; This tool owns created/spawned/result/accepted/rejected and replacement
+;; links; the daemon writes merged (S3). Illegal transitions exit 2 with an
+;; INVALID_TRANSITION token.
 
-(load-file (str (babashka.fs/path (babashka.fs/parent *file*) "handoff_lib.bb")))
+(load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
 (ns squad-assign
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn]
             [clojure.string :as str]))
 
 (def usage-text
   (str "Usage: squad_assign.sh <subcommand> ...\n\n"
        "  create <id> <template> <instructions-file>\n"
        "  status <id>\n"
+       "  spawn <id>\n"
        "  result <id> <handoff-file>\n"
        "  accept <id>\n"
        "  reject <id> <reason...>\n"
        "  replace <old-id> <new-id> <template> <instructions-file>"))
 
-;; --- squad state layout ---------------------------------------------------
+;; --- assignment records ---------------------------------------------------
 
-(defn squad-dir [] (fs/path (handoff-lib/project-root) ".swarmforge" "squad"))
-(defn assignment-dir [id] (fs/path (squad-dir) "assignments" id))
+(defn assignment-dir [id] (fs/path (squad-lib/squad-dir) "assignments" id))
 (defn status-file [id] (fs/path (assignment-dir id) "status.edn"))
 
-(defn log-event!
-  "Append one line to events.log: '<iso-timestamp> <id> <event> [detail]'.
-  Every state change must pass through here — the log feeds `swarm logs`
-  and is the durable record herdr's live-only states cannot provide."
-  [id event detail]
-  (fs/create-dirs (squad-dir))
-  (spit (str (fs/path (squad-dir) "events.log"))
-        (str (handoff-lib/iso-now) " " id " " event
-             (when-not (str/blank? detail) (str " " detail))
-             "\n")
-        :append true))
-
 (defn read-status [id]
-  (let [file (status-file id)]
-    (when-not (fs/exists? file)
-      (handoff-lib/die 1 (str "NO_SUCH_ASSIGNMENT: " id)))
-    (edn/read-string (slurp (str file)))))
+  (squad-lib/read-record (status-file id) "NO_SUCH_ASSIGNMENT" id))
 
 (defn write-status! [id status]
-  (spit (str (status-file id))
-        (str (pr-str (assoc status :updated-at (handoff-lib/iso-now))) "\n")))
+  (squad-lib/write-record! (status-file id) status))
 
 ;; --- transitions ----------------------------------------------------------
 
@@ -63,24 +46,20 @@
   (the normal path) and :created (leader-routed work before spawn exists);
   reject accepts :spawned so a worker that dies without a result can still
   be closed out."
-  {:result   #{:created :spawned}
+  {:spawned  #{:created}
+   :result   #{:created :spawned}
    :accepted #{:result}
    :rejected #{:result :spawned}})
 
-(defn transition!
-  "Validated state change: die 2 on an illegal move; otherwise run effect!
-  (side effects belong after validation, before the write), persist the new
-  state plus extra fields, log, and announce."
-  [id new-state {:keys [extra detail effect!]}]
-  (let [status (read-status id)
-        old-state (:state status)]
-    (when-not (contains? (get allowed-transitions new-state #{}) old-state)
-      (handoff-lib/die 2 (format "INVALID_TRANSITION: assignment '%s' cannot go %s -> %s"
-                                 id (name old-state) (name new-state))))
-    (when effect! (effect!))
-    (write-status! id (merge status extra {:state new-state}))
-    (log-event! id (name new-state) detail)
-    (println (str "ASSIGNMENT_STATE: " id " " (name old-state) " -> " (name new-state)))))
+(defn- transition! [id new-state opts]
+  (squad-lib/transition! (merge {:file (status-file id)
+                                 :missing-token "NO_SUCH_ASSIGNMENT"
+                                 :announce-token "ASSIGNMENT_STATE"
+                                 :label "assignment"
+                                 :id id
+                                 :allowed (get allowed-transitions new-state #{})
+                                 :new-state new-state}
+                                opts)))
 
 ;; --- subcommands ----------------------------------------------------------
 
@@ -100,8 +79,8 @@
                               :state :created
                               :created-at (handoff-lib/iso-now)}
                        replaces (assoc :replaces replaces)))
-   (log-event! id "created" (str "template=" template
-                                 (when replaces (str " replaces=" replaces))))
+   (squad-lib/log-event! id "created" (str "template=" template
+                                           (when replaces (str " replaces=" replaces))))
    (println (str "ASSIGNMENT_CREATED: " id))))
 
 (defn status! [id]
@@ -113,6 +92,9 @@
     (when replaces (println "REPLACES:" replaces))
     (when replaced-by (println "REPLACED_BY:" replaced-by))))
 
+(defn spawn! [id]
+  (transition! id :spawned {}))
+
 (defn result! [id handoff-file]
   (when-not (fs/regular-file? handoff-file)
     (handoff-lib/die 1 (str "Handoff file not found: " handoff-file)))
@@ -121,7 +103,9 @@
                  ;; replace-existing: a crashed prior attempt may have copied
                  ;; the file before the status write; the retry must succeed.
                  {:effect! #(fs/copy handoff-file stored {:replace-existing true})
-                  :extra {:result-file (str stored)}
+                  ;; Stored relative to the assignment dir so the record
+                  ;; survives the repository moving.
+                  :extra {:result-file "result.handoff"}
                   :detail (str "handoff=" (fs/file-name (fs/path handoff-file)))})))
 
 (defn accept! [id]
@@ -149,7 +133,7 @@
                                  old-id (name (:state old-status)))))
     (create! new-id template instructions-file old-id)
     (write-status! old-id (assoc old-status :replaced-by new-id))
-    (log-event! old-id "replaced" (str "replaced-by=" new-id))
+    (squad-lib/log-event! old-id "replaced" (str "replaced-by=" new-id))
     (println (str "ASSIGNMENT_REPLACED: " old-id " -> " new-id))))
 
 ;; --- entry ----------------------------------------------------------------
@@ -163,6 +147,7 @@
     (case command
       "create" (if (= 3 (count params)) (apply create! params) (usage-die))
       "status" (if (= 1 (count params)) (status! (first params)) (usage-die))
+      "spawn" (if (= 1 (count params)) (spawn! (first params)) (usage-die))
       "result" (if (= 2 (count params)) (apply result! params) (usage-die))
       "accept" (if (= 1 (count params)) (accept! (first params)) (usage-die))
       "reject" (if (<= 2 (count params)) (reject! (first params) (str/join " " (rest params))) (usage-die))

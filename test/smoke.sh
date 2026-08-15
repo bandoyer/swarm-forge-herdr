@@ -219,5 +219,85 @@ set -e
 expect "result retry transition" "ASSIGNMENT_STATE: a4 created -> result" <<<"$OUT"
 rm -f instructions.md worker.handoff
 
+step "squad worker: allocate/activate/retire lifecycle"
+OUT="$("$SCRIPTS/squad_worker.sh" allocate a1 implementer)"
+expect "worker allocated" "WORKER_ALLOCATED: project-implementer-a1" <<<"$OUT"
+[ -f .swarmforge/squad/workers/project-implementer-a1.edn ] || fail "worker record not written"
+ok "worker record written"
+OUT="$("$SCRIPTS/squad_worker.sh" activate project-implementer-a1)"
+expect "worker activated" "WORKER_STATE: project-implementer-a1 allocated -> active" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" retire project-implementer-a1 assignment merged)"
+expect "worker retired" "WORKER_STATE: project-implementer-a1 active -> retired" <<<"$OUT"
+
+step "squad worker: list output and --active filter"
+"$SCRIPTS/squad_worker.sh" allocate a2 implementer > /dev/null
+"$SCRIPTS/squad_worker.sh" allocate a3 reviewer > /dev/null
+"$SCRIPTS/squad_worker.sh" activate project-implementer-a2 > /dev/null
+OUT="$("$SCRIPTS/squad_worker.sh" list)"
+expect "list shows retired worker" "project-implementer-a1 retired implementer a1" <<<"$OUT"
+expect "list shows active worker" "project-implementer-a2 active implementer a2" <<<"$OUT"
+expect "list shows allocated worker" "project-reviewer-a3 allocated reviewer a3" <<<"$OUT"
+expect "list reports active count and cap" "ACTIVE: 2/10" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" list --active)"
+if grep -qF "project-implementer-a1" <<<"$OUT"; then fail "--active should hide retired workers"; fi
+ok "--active hides retired workers"
+expect "--active keeps allocated worker" "project-reviewer-a3 allocated reviewer a3" <<<"$OUT"
+
+step "squad worker: capacity cap from squad.conf"
+printf 'max_transient_agents 2\n' > swarmforge/squad.conf
+set +e
+OUT="$("$SCRIPTS/squad_worker.sh" allocate a4 implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "capacity exhaustion should exit 2, got $STATUS"
+expect "capacity token" "CAPACITY_EXHAUSTED" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" list)"
+expect "list reflects lowered cap" "ACTIVE: 2/2" <<<"$OUT"
+rm swarmforge/squad.conf
+
+step "squad worker: name sanitization and left-trim"
+OUT="$("$SCRIPTS/squad_worker.sh" allocate a4 'Q.A')"
+expect "uppercase and dots sanitized" "WORKER_ALLOCATED: project-q-a-a4" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" allocate 12345678901234567890123456789012 implementer)"
+expect "long name left-trimmed and letter-prefixed" "WORKER_ALLOCATED: w2345678901234567890123456789012" <<<"$OUT"
+
+step "squad worker: duplicate allocate, illegal transition, unknown worker"
+set +e
+OUT="$("$SCRIPTS/squad_worker.sh" allocate a4 'Q.A' 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "duplicate allocate should exit 2, got $STATUS"
+expect "duplicate allocate token" "WORKER_EXISTS: project-q-a-a4" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_worker.sh" activate project-implementer-a1 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "activating a retired worker should exit 2, got $STATUS"
+expect "worker illegal transition token" "INVALID_TRANSITION: worker 'project-implementer-a1' cannot go retired -> active" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_worker.sh" activate no-such 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "unknown worker should exit 1, got $STATUS"
+expect "unknown worker token" "NO_SUCH_WORKER: no-such" <<<"$OUT"
+
+step "squad assign: spawn transition"
+OUT="$("$SCRIPTS/squad_assign.sh" spawn a3)"
+expect "spawn transition" "ASSIGNMENT_STATE: a3 created -> spawned" <<<"$OUT"
+
+step "squad worker: events.log records worker state changes"
+grep -q ' project-implementer-a1 allocated template=implementer assignment=a1' "$LOG" || { cat "$LOG"; fail "allocate not logged"; }
+ok "allocate logged"
+grep -q ' project-implementer-a1 active' "$LOG" || { cat "$LOG"; fail "activate not logged"; }
+ok "activate logged"
+grep -q ' project-implementer-a1 retired reason=assignment merged' "$LOG" || { cat "$LOG"; fail "retire reason not logged"; }
+ok "retire reason logged"
+grep -q ' a3 spawned' "$LOG" || { cat "$LOG"; fail "spawn not logged"; }
+ok "spawn logged"
+[ "$(grep -c ' project-implementer-a1 ' "$LOG")" -eq 3 ] || { cat "$LOG"; fail "worker should log exactly 3 events"; }
+ok "one line per worker state change"
+[ -z "$(grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ' "$LOG")" ] || { cat "$LOG"; fail "events.log lines must be timestamped"; }
+ok "worker events.log lines timestamped"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"
