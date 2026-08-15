@@ -311,5 +311,34 @@ ok "one line per worker state change"
 [ -z "$(grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ' "$LOG")" ] || { cat "$LOG"; fail "events.log lines must be timestamped"; }
 ok "worker events.log lines timestamped"
 
+step "squad: spawn driver file-state path (--no-agent)"
+cd "$CODER"
+SWARM="$TOOL_ROOT/bin/swarm"
+echo "Do the thing precisely." > sp.md
+"$SCRIPTS/squad_assign.sh" create sp1 implementer sp.md >/dev/null
+OUT="$("$SWARM" squad spawn sp1 implementer --no-agent)"
+expect "spawn reports worker" "WORKER_SPAWNED:" <<<"$OUT"
+WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+[ -d ".worktrees/$WORKER/.swarmforge/handoffs/inbox/new" ] || fail "worker worktree/queue not prepared"
+ok "worker worktree and queue dirs created"
+grep -q "^$WORKER	" .swarmforge/roles.tsv || fail "worker not registered in roles.tsv"
+ok "worker registered for routing"
+OUT="$("$SCRIPTS/squad_assign.sh" status sp1)"
+expect "assignment moved to spawned" "STATE: spawned" <<<"$OUT"
+set +e
+OUT="$("$SWARM" squad spawn sp1 implementer --no-agent 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "re-spawn of spawned assignment should fail, got $STATUS"
+expect "re-spawn rejected" "not 'created'" <<<"$OUT"
+
+step "squad: retire frees routing and worktree"
+OUT="$("$SWARM" squad retire "$WORKER" done --no-agent)"
+expect "retire reports worker" "WORKER_RETIRED: $WORKER" <<<"$OUT"
+grep -q "^$WORKER	" .swarmforge/roles.tsv && fail "worker still in roles.tsv"
+ok "worker deregistered"
+[ ! -d ".worktrees/$WORKER" ] || fail "worker worktree not removed"
+ok "worker worktree removed"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"

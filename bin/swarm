@@ -52,6 +52,20 @@
            (str/trim (str out "\n" err))))
     out))
 
+(defn project-agent-name
+  "Global herdr agent name for a role or worker in this project: project
+  prefix + lowercased suffix, herdr-safe, left-trimmed to 32 chars so the
+  distinctive tail survives."
+  [suffix]
+  (let [prefix (-> (str (fs/file-name project-root))
+                   str/lower-case
+                   (str/replace #"[^a-z0-9_-]" "-")
+                   (as-> p (if (re-find #"^[a-z]" p) p (str "p" p))))
+        n (-> (str prefix "-" (str/lower-case suffix))
+              (str/replace #"[^a-z0-9_-]" "-"))
+        n (if (> (count n) 32) (subs n (- (count n) 32)) n)]
+    (if (re-find #"^[a-z]" n) n (str "w" (subs n 1)))))
+
 ;; --- configuration --------------------------------------------------------
 
 (defn parse-conf []
@@ -82,12 +96,7 @@
             ;; herdr agent names must be lowercase AND are global across all
             ;; workspaces, so they get a project prefix — otherwise two swarms
             ;; sharing role names adopt each other's agents.
-            (let [prefix (-> (str (fs/file-name project-root))
-                             str/lower-case
-                             (str/replace #"[^a-z0-9_-]" "-")
-                             (as-> p (if (re-find #"^[a-z]" p) p (str "p" p))))
-                  agent-name (let [n (str prefix "-" (str/lower-case role))]
-                               (if (> (count n) 32) (subs n (- (count n) 32)) n))]
+            (let [agent-name (project-agent-name role)]
               (when-not (re-matches #"[a-z][a-z0-9_-]{0,31}" agent-name)
                 (die (format "Role '%s' cannot be mapped to a herdr agent name (got '%s')." role agent-name)))
               {:role role
@@ -518,6 +527,174 @@
             :let [[role _ path _ _ kind mode] (str/split line #"\t" -1)]]
       (println (format "role:    %-12s %-8s %-5s %s" role kind mode path)))))
 
+;; --- squad (v2, S2): persistent leader + transient workers ----------------
+
+(defn- squad-script
+  "Run a squad state script from the project root; die on failure,
+  return its stdout."
+  [script & args]
+  (let [{:keys [exit out err]} (apply process/sh {:continue true :dir (str project-root)}
+                                     "bb" (str (fs/path scripts-src (str script ".bb"))) args)]
+    (when-not (zero? exit)
+      (die (str script " " (str/join " " args) " failed:") (str/trim (str out "\n" err))))
+    (str out)))
+
+(defn- script-token
+  "Extract '<TOKEN>: value' from a script's output."
+  [output token]
+  (some #(when (str/starts-with? % (str token ": "))
+           (str/trim (subs % (inc (count (str token ":"))))))
+        (str/split-lines output)))
+
+(defn- roles-rows []
+  (let [file (fs/path state-dir "roles.tsv")]
+    (if (fs/exists? file)
+      (vec (for [line (str/split-lines (slurp (str file)))
+                 :when (not (str/blank? line))]
+             (str/split line #"\t" -1)))
+      [])))
+
+(defn- write-roles-rows! [rows]
+  (fs/create-dirs state-dir)
+  (spit (str (fs/path state-dir "roles.tsv"))
+        (str/join "" (map #(str (str/join "\t" %) "\n") rows))))
+
+(defn- role-row [role worktree-name worktree-path agent-name kind]
+  [role worktree-name worktree-path agent-name role kind "task"])
+
+(defn- prepare-worktree! [name path]
+  (when-not (fs/exists? (fs/path path ".git"))
+    (sh-ok "git" "-C" (str project-root) "worktree" "add" "--force"
+           "-B" (str "swarm-worker-" name) path "HEAD"))
+  (doseq [sub [["outbox" "tmp"] ["sent"] ["failed"]
+               ["inbox" "new"] ["inbox" "in_process"] ["inbox" "completed"]]]
+    (fs/create-dirs (apply fs/path path ".swarmforge" "handoffs" sub)))
+  (let [target (fs/path path "swarmforge" "scripts")]
+    (when-not (= (str target) (str scripts-src))
+      (fs/create-dirs target)
+      (doseq [script (fs/list-dir scripts-src)]
+        (fs/copy script (fs/path target (fs/file-name script))
+                 {:replace-existing true :copy-attributes true})))))
+
+(def leader-name "squad-leader")
+
+(defn squad-up! [kind-arg]
+  (when-not (fs/exists? (fs/path project-root ".git"))
+    (die "Run swarm from the root of a git repository."))
+  (when (and (daemon-running?)
+             (seq (roles-rows))
+             (not-any? #(= leader-name (first %)) (roles-rows)))
+    (die "A pack swarm is active in this project; run `swarm down` first."))
+  (let [kind (or kind-arg "claude")
+        prompts (fs/path tool-root "prompts")
+        agent-name (project-agent-name leader-name)]
+    (install! (fs/path prompts "worker-common.prompt")
+              (fs/path project-root "swarmforge" "worker-common.prompt"))
+    (install! (fs/path prompts "roles" "squad-leader.prompt")
+              (fs/path project-root "swarmforge" "roles" "squad-leader.prompt"))
+    (ensure-gitignore!)
+    (prepare-worktree! leader-name (str project-root))
+    ;; leader row plus any surviving worker rows from a previous session
+    (write-roles-rows! (into [(role-row leader-name "master" (str project-root) agent-name kind)]
+                             (remove #(= leader-name (first %)) (roles-rows))))
+    (let [workspace-id (or (existing-workspace)
+                           (let [ws (herdr "workspace" "create"
+                                           "--cwd" (str project-root)
+                                           "--label" (str "squad:" (fs/file-name project-root))
+                                           "--no-focus")
+                                 id (find-id ws "workspace")]
+                             (spit (str (fs/path state-dir "herdr-workspace")) (str id "\n"))
+                             id))]
+      (if ((existing-agents) agent-name)
+        (println "squad-leader already running.")
+        (let [tab (herdr "tab" "create" "--workspace" workspace-id
+                         "--cwd" (str project-root) "--label" leader-name
+                         "--env" (str "SWARMFORGE_ROLE=" leader-name) "--no-focus")
+              pane-id (find-id tab "pane")
+              start (herdr-try "agent" "start" agent-name "--kind" kind "--pane" pane-id)]
+          (if (:ok? start)
+            (herdr "agent" "prompt" agent-name
+                   (str "You are the squad-leader. Read swarmforge/roles/squad-leader.prompt "
+                        "and follow it exactly. Your project root is " project-root ". "
+                        "Check the queue now with swarmforge/scripts/ready_for_next.sh, then "
+                        "report to the user that the squad is ready and wait for direction."))
+            (println "squad-leader started but BLOCKED (startup dialog); answer it, then `swarm bootstrap squad-leader` equivalent: rerun `swarm squad up`."))
+          (slog! "squad-up: leader started as" agent-name))))
+    (start-daemon!)
+    (println)
+    (println "Squad is up. Talk to the squad-leader pane, or seed it with:")
+    (println "  herdr agent prompt" (project-agent-name leader-name) "\"<your request>\"")))
+
+(defn squad-spawn! [assignment-id template no-agent?]
+  (when (or (str/blank? assignment-id) (str/blank? template))
+    (die "Usage: swarm squad spawn <assignment-id> <template> [--no-agent]"))
+  ;; cross-registry validation: the assignment must exist and be spawnable
+  (let [status-out (squad-script "squad_assign" "status" assignment-id)
+        state (script-token status-out "STATE")]
+    (when-not (= "created" state)
+      (die (str "Assignment " assignment-id " is '" state "', not 'created'; cannot spawn."))))
+  (let [alloc (squad-script "squad_worker" "allocate" assignment-id template)
+        worker (or (script-token alloc "WORKER_ALLOCATED")
+                   (die "squad_worker allocate returned no worker name:" alloc))
+        path (str (fs/path worktrees-dir worker))]
+    (prepare-worktree! worker path)
+    (write-roles-rows! (conj (roles-rows) (role-row worker worker path worker "claude")))
+    (when-not no-agent?
+      (let [workspace-id (or (existing-workspace) (die "No squad workspace; run `swarm squad up` first."))
+            tab (herdr "tab" "create" "--workspace" workspace-id
+                       "--cwd" path "--label" worker
+                       "--env" (str "SWARMFORGE_ROLE=" worker) "--no-focus")
+            pane-id (find-id tab "pane")]
+        (fs/create-dirs (fs/path state-dir "squad" "herdr"))
+        (spit (str (fs/path state-dir "squad" "herdr" (str worker ".edn")))
+              (pr-str {:tab-id (find-id tab "tab") :pane-id pane-id}))
+        (herdr "agent" "start" worker "--kind" "claude" "--pane" pane-id)
+        (herdr "agent" "prompt" worker
+               (str "You are transient squad worker '" worker "' (template: " template "). "
+                    "Read swarmforge/worker-common.prompt"
+                    (when (fs/exists? (fs/path project-root "swarmforge" "roles" (str template ".prompt")))
+                      (str " and swarmforge/roles/" template ".prompt"))
+                    " and obey them. Your worktree is " path ". "
+                    "YOUR ASSIGNMENT (id " assignment-id "):\n\n"
+                    (slurp (str (fs/path state-dir "squad" "assignments" assignment-id "assignment.md")))
+                    "\n\nWhen fully complete: commit, send a git_handoff to squad-leader "
+                    "with task '" assignment-id "' via swarmforge/scripts/swarm_handoff.sh, "
+                    "then run swarmforge/scripts/done_with_current.sh."))))
+    (squad-script "squad_worker" "activate" worker)
+    (squad-script "squad_assign" "spawn" assignment-id)
+    (slog! "squad: spawned" worker "for" assignment-id (str "(" template ")"))
+    (println "WORKER_SPAWNED:" worker)))
+
+(defn squad-retire! [worker reason no-agent?]
+  (when (str/blank? worker)
+    (die "Usage: swarm squad retire <worker-name> [reason...]"))
+  (apply squad-script "squad_worker" "retire" worker
+         (when-not (str/blank? reason) [reason]))
+  (write-roles-rows! (vec (remove #(= worker (first %)) (roles-rows))))
+  (when-not no-agent?
+    (let [sidecar (fs/path state-dir "squad" "herdr" (str worker ".edn"))]
+      (when (fs/exists? sidecar)
+        (let [{:keys [tab-id]} (edn/read-string (slurp (str sidecar)))]
+          (herdr-try "tab" "close" tab-id))
+        (fs/delete sidecar))))
+  (let [path (fs/path worktrees-dir worker)]
+    (when (fs/exists? path)
+      (process/sh {:continue true} "git" "-C" (str project-root)
+                  "worktree" "remove" "--force" (str path))))
+  (slog! "squad: retired" worker)
+  (println "WORKER_RETIRED:" worker))
+
+(defn squad! [args]
+  (let [flags (set (filter #(str/starts-with? % "--") args))
+        args (vec (remove #(str/starts-with? % "--") args))
+        no-agent? (contains? flags "--no-agent")]
+    (case (first args)
+      "up" (squad-up! (second args))
+      "spawn" (squad-spawn! (second args) (nth args 2 nil) no-agent?)
+      "retire" (squad-retire! (second args) (str/join " " (drop 2 args)) no-agent?)
+      "status" (print (squad-script "squad_worker" "list"))
+      (die "Usage: swarm squad [up [kind] | spawn <assignment-id> <template> | retire <worker> [reason] | status]"))))
+
 (defn -main [args]
   (case (first args)
     "init" (init! (second args))
@@ -530,7 +707,8 @@
     "status" (status!)
     "logs" (logs! (second args))
     "prompt" (prompt! (second args) (str/join " " (drop 2 args)))
+    "squad" (squad! (vec (rest args)))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | down | status | logs [n]]")))
+         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | status | logs [n]]")))
 
 (-main *command-line-args*)

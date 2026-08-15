@@ -93,7 +93,13 @@ stale-worktree warning in `swarm switch`.
   `*.contract.edn` (artifact roots + required evidence), hard-block
   validation in `swarm_handoff`, contracts for all 8 pack roles,
   installed by init/switch, smoke-tested (22 checks)
-- [ ] S2 transient workers + squad-leader
+- [x] S2 transient workers + squad-leader (2026-08-15): swarm-built
+  `squad_assign` + `squad_worker` + `squad_lib` (lifecycle, registry,
+  capacity, events); operator-built spawn/retire driver (`swarm squad
+  spawn/retire`, cross-registry validation, dynamic roles.tsv routing so
+  the router serves workers automatically), `swarm squad up` (persistent
+  leader), worker-common + squad-leader prompts. 76 smoke checks. Live
+  squad dogfood pending.
 - [ ] S3 advisor (`squad-next`) + daemon main-git ownership
 - [ ] S4 themes, approvals (CLI + herdr notifications), reporting
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
