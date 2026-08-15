@@ -69,12 +69,16 @@ Acceptance-Pipeline-Specification, dependency-checker}, generate `bb` shims
 | crap | **crap4net** | **build**: Roslyn code metrics + lcov → CRAP = c²(1−cov)³+c, gate ≤ 6. Candidate standalone repo. |
 | gherkin mutation | upstream APS `gherkin-mutator` + NDJSON worker driving Reqnroll | defer to v2 |
 
-## Phase 4 — Validation (dogfood)
+## Phase 4 — Validation (dogfood) ✅
 
-Small .NET target app with real logic. Run `two` pack end-to-end, then `six`
-with the full evidence regime. Acceptance: feature request enters at
-specifier, exits as reviewed, hardened, evidence-backed commits, pipeline
-state visible live in herdr.
+Done 2026-08-15 on ~/Work/swarm-dogfood (two-pack, live Claude agents).
+Full loop closed: task → coder TDD slice → validated handoff → router
+delivery + wake → cleaner batch accept (two handoffs, one batch) → audit
+pass with real, independently reverified evidence (10/10 tests, 100%
+coverage, crap4net 7/7 within bar, jscpd 0 clones) → terminal return
+handoffs → coder merge → all idle. Launcher fixes found and shipped:
+blocked-at-startup agents non-fatal, rerunnable `up`, `swarm bootstrap`.
+Six-pack with the full evidence regime: future work.
 
 ## Phase 5 — v2 (out of scope for v1)
 
