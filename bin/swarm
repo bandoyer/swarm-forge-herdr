@@ -29,6 +29,17 @@
 (def worktrees-dir (fs/path project-root ".worktrees"))
 (def receive-modes #{"task" "batch"})
 
+(defn slog!
+  "Append a timestamped line to the swarm's own log so launcher actions
+  survive terminal scrollback."
+  [& parts]
+  (try
+    (fs/create-dirs state-dir)
+    (spit (str (fs/path state-dir "swarm.log"))
+          (str (java.time.Instant/now) " " (str/join " " parts) "\n")
+          :append true)
+    (catch Exception _ nil)))
+
 (defn die [& lines]
   (binding [*out* *err*]
     (doseq [line lines :when line] (println line)))
@@ -220,7 +231,8 @@
         needs-attention (atom [])]
     (doseq [{:keys [role agent-name agent-kind worktree-path extra-args]} rows]
       (if (running agent-name)
-        (println role "already running.")
+        (do (slog! "up:" role "already running")
+            (println role "already running."))
         (let [_ (println "Starting" role (str "(" agent-kind ")") "in" worktree-path)
               tab (herdr "tab" "create"
                          "--workspace" workspace-id
@@ -234,15 +246,19 @@
           (cond
             (:ok? start)
             (let [prompted (herdr-try "agent" "prompt" agent-name (bootstrap-prompt role))]
+              (slog! "up: started" role "as" agent-name "in pane" pane-id)
               (when-not (:ok? prompted)
+                (slog! "up: bootstrap prompt failed for" role)
                 (swap! needs-attention conj role)))
 
             (= "agent_not_ready" (:error-code start))
             (do (println "  " role "started but is BLOCKED (a startup dialog in its pane).")
+                (slog! "up:" role "blocked at startup, needs attention")
                 (swap! needs-attention conj role))
 
             :else
-            (die (str "herdr agent start " role " failed:") (:error-message start))))))
+            (do (slog! "up: agent start FAILED for" role "-" (:error-message start))
+                (die (str "herdr agent start " role " failed:") (:error-message start)))))))
     @needs-attention))
 
 ;; --- daemon lifecycle -----------------------------------------------------
@@ -268,6 +284,7 @@
             proc (process/process
                   ["bb" (str (fs/path scripts-src "handoffd.bb")) (str project-root)]
                   {:out :append :out-file log :err :append :err-file log})]
+        (slog! "up: handoffd started, pid" (.pid (:proc proc)))
         (println "handoffd started, pid" (.pid (:proc proc)))))))
 
 (defn stop-daemon! []
@@ -400,6 +417,7 @@
       (println "Sent role bootstrap to" role))))
 
 (defn down! []
+  (slog! "down: requested")
   (stop-daemon!)
   (let [ws-file (fs/path state-dir "herdr-workspace")]
     (if (fs/exists? ws-file)
@@ -408,6 +426,55 @@
         (fs/delete ws-file)
         (println "Closed herdr workspace" workspace-id))
       (println "No recorded herdr workspace; close it in herdr if one is open."))))
+
+(defn- handoff-file-events
+  "Timeline events from one handoff file's lifecycle headers. Sender-side
+  copies (outbox/sent/failed) report creation; recipient-side copies
+  (inbox/**) report enqueue/accept/complete, so nothing double-counts."
+  [file]
+  (let [[header] (str/split (slurp (str file)) #"\n\n" 2)
+        h (into {} (keep #(let [[k v] (str/split % #": " 2)] (when v [k v]))
+                         (str/split-lines header)))
+        id (get h "id" (fs/file-name file))
+        recipient-copy? (str/includes? (str file) "/inbox/")]
+    (if recipient-copy?
+      (keep (fn [[field label]]
+              (when-let [t (get h field)]
+                [t (str label " " id " (" (get h "recipient") ")")]))
+            [["enqueued_at" "enqueued"] ["dequeued_at" "accepted"] ["completed_at" "completed"]])
+      (when-let [t (get h "created_at")]
+        [[t (str "created " id ": " (get h "from") " -> " (get h "to")
+                 (when-let [task (get h "task")] (str " task=" task))
+                 (when (str/includes? (str file) "/failed/") "  [FAILED]"))]]))))
+
+(defn logs!
+  "Interleave the launcher log, router log, and every handoff's lifecycle
+  headers into one timeline (last N events, default 40)."
+  [n-arg]
+  (let [n (or (some-> n-arg parse-long) 40)
+        tagged-lines (fn [path tag]
+                       (for [line (if (fs/exists? path)
+                                    (remove str/blank? (str/split-lines (slurp (str path))))
+                                    [])
+                             :let [[t & rest] (str/split line #" ")]]
+                         [t (str tag " " (str/join " " rest))]))
+        worktrees (if (fs/exists? (fs/path state-dir "roles.tsv"))
+                    (distinct (for [line (str/split-lines (slurp (str (fs/path state-dir "roles.tsv"))))
+                                    :when (not (str/blank? line))]
+                                (nth (str/split line #"\t" -1) 2)))
+                    [(str project-root)])
+        queue-events (for [wt worktrees
+                           :let [root (fs/path wt ".swarmforge" "handoffs")]
+                           :when (fs/exists? root)
+                           file (fs/glob root "**.handoff")
+                           event (handoff-file-events file)]
+                       [(first event) (str "[queue]  " (second event))])
+        events (sort-by first
+                        (concat (tagged-lines (fs/path state-dir "swarm.log") "[swarm] ")
+                                (tagged-lines (fs/path state-dir "daemon" "handoffd.log") "[router]")
+                                queue-events))]
+    (doseq [[t message] (take-last n events)]
+      (println t message))))
 
 (defn status! []
   (println "project:" (str project-root))
@@ -428,7 +495,8 @@
     "bootstrap" (bootstrap! (second args))
     "down" (down!)
     "status" (status!)
+    "logs" (logs! (second args))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | toolset <name> | up | bootstrap [role] | down | status]")))
+         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | down | status | logs [n]]")))
 
 (-main *command-line-args*)

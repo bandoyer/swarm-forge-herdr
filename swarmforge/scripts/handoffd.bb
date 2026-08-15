@@ -60,7 +60,8 @@
     (when-not (= "none" cmd)
       (let [{:keys [exit err]} (process/sh {:continue true}
                                            cmd "agent" "prompt" agent-name wake-message)]
-        (when-not (zero? exit)
+        (if (zero? exit)
+          (log! "waked" agent-name)
           (log! "wake-failed" agent-name (str/trim (or err ""))))))))
 
 ;; --- delivery -------------------------------------------------------------
