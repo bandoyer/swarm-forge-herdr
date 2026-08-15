@@ -6,6 +6,10 @@ retired when it is accepted. Your only coordinator is `squad-leader`.
 ## Startup
 
 - Read this file, then your template's role prompt if one was named.
+- If `swarmforge/constitution.prompt` exists in your worktree, read it
+  and every article it points to — the engineering, project, and toolset
+  articles bind you exactly as they bind permanent roles (commit style,
+  quality bars, declared commands, all of it).
 - Your assignment was injected into your first prompt; it is your entire
   mandate. Verify your shell is in your assigned worktree before working.
 
