@@ -100,7 +100,13 @@ stale-worktree warning in `swarm switch`.
   the router serves workers automatically), `swarm squad up` (persistent
   leader), worker-common + squad-leader prompts. 76 smoke checks. Live
   squad dogfood pending.
-- [ ] S3 advisor (`squad-next`) + daemon main-git ownership
+- [x] S3 advisor + daemon git ownership (2026-08-15): swarm-built
+  `squad_spawn_request` + `squad_next` (10-row action table, exhaustive
+  smoke) and `squadd` (mechanical transitions, sole main-git owner,
+  branch guard, argv hardening) — both through findings-loop-backs
+  (stale requests, events.log injection, wrong-branch merge, commit-header
+  injection); operator-built leader authority downgrade + merger
+  template/contract. 156 smoke checks. Live S3 dogfood pending.
 - [ ] S4 themes, approvals (CLI + herdr notifications), reporting
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 

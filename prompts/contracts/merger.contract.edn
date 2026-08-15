@@ -1,0 +1,6 @@
+{:role "merger"
+ :singleton true
+ :artifact-roots ["src/" "tests/" "test/" "specs/" "features/" "qa/" "docs/"
+                  "swarmforge/scripts/" "bin/" "prompts/" "packs/" "toolsets/"]
+ :required-evidence [{:name "suite-green" :pattern "(?i)(\\d+ )?(tests? )?passed|smoke passed|dotnet test|bb test"}
+                     {:name "conflicts-documented" :pattern "(?i)conflict"}]}
