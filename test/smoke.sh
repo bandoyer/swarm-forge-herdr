@@ -796,6 +796,56 @@ ok "S4 rows fire in table order"
 rm swarmforge/squad.conf
 cd "$CODER"
 
+# Reviewer findings on aa31e6bf64 (S4 slice A) — committed disabled; run
+# with SMOKE_FINDINGS=1 to watch them fail; the coder's fix enables them.
+if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
+
+step "FINDING: superseded rejection fires row 13 alongside the row-5* merge"
+# rejected ap1 + later approved ap2 for the same target: row 5* releases
+# the merge (mechanical, daemon-applied) while row 13 simultaneously tells
+# the leader to reject/rework the same assignment — contradictory advice
+# racing the daemon's merge. An :approved record superseding the rejection
+# must silence row 13.
+F4="$WORK/advisor-s4-findings"
+mkdir -p "$F4/.swarmforge" "$F4/swarmforge"
+cp "$PROJECT/.swarmforge/roles.tsv" "$F4/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$F4/swarmforge/scripts"
+cd "$F4"
+synth f1 '{:id "f1" :template "implementer" :state :accepted}'
+printf 'require_approval merge\n' > swarmforge/squad.conf
+"$SCRIPTS/squad_approval.sh" request apf1 merge f1 "Merge f1" first ask > /dev/null
+"$SCRIPTS/squad_approval.sh" reject apf1 not yet > /dev/null
+"$SCRIPTS/squad_approval.sh" request apf2 merge f1 "Merge f1 again" second ask > /dev/null
+"$SCRIPTS/squad_approval.sh" approve apf2 ok now > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "approved re-request releases the merge" "NEXT_ACTION: merge" <<<"$OUT"
+if grep -A3 '^NEXT_ACTION: handle-approval-rejection$' <<<"$OUT" | grep -q 'TARGET: f1'; then
+  echo "$OUT"
+  fail "an approved record superseding the rejection must silence row 13 for f1"
+fi
+ok "superseded rejection does not contradict the released merge"
+cd "$CODER"
+
+step "FINDING: interrupted theme create wedges the theme id"
+# A theme dir without status.edn (create interrupted between create-dirs
+# and write-record!) is unrecoverable: create says THEME_EXISTS, while
+# status/attach say NO_SUCH_THEME, and no tool can repair it. The
+# assignments layer explicitly skips such half-created dirs; themes should
+# extend the same grace — re-running create must succeed.
+mkdir -p .swarmforge/squad/themes/thwedge
+echo "wedge theme" > thwedge.md
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" create thwedge thwedge.md 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || { echo "$OUT"; fail "create must recover a half-created theme dir, got exit $STATUS"; }
+expect "create recovers a half-created theme" "THEME_CREATED: thwedge" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_theme.sh" status thwedge)"
+expect "recovered theme has a readable status" "THEME: thwedge" <<<"$OUT"
+rm -f thwedge.md
+
+fi
+
 step "squadd: simulator project (leader row, scripted workers, no agents)"
 SQ="$WORK/squadproj"
 mkdir -p "$SQ"
