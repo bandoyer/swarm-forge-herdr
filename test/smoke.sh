@@ -736,5 +736,96 @@ ok "retry consumed the request"
 unset SWARMFORGE_NO_AGENT SWARM_BIN
 cd "$CODER"
 
+step "squadd: a residual wakes the configured leader agent"
+# The main suite exports SWARMFORGE_WAKE_CMD=none, so the wake path
+# (roles.tsv agent lookup + wake shell-out) was otherwise never exercised.
+FP="$WORK/findproj"
+mkdir -p "$FP"
+git -C "$FP" init -qb main
+echo base > "$FP/f.txt"
+git -C "$FP" add f.txt
+git -C "$FP" -c user.email=smoke@test -c user.name=smoke commit -qm initial
+mkdir -p "$FP/.swarmforge" "$FP/swarmforge"
+printf 'squad-leader\tmaster\t%s\tsquad-leader\tsquad-leader\tclaude\ttask\n' "$FP" \
+  > "$FP/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$FP/swarmforge/scripts"
+cd "$FP"
+echo work > instr.md
+cat > fake-wake <<'EOF'
+#!/usr/bin/env bash
+echo "WAKE $*" >> "$(dirname "$0")/wakes.log"
+EOF
+chmod +x fake-wake
+"$SCRIPTS/squad_assign.sh" create wk0 implementer instr.md > /dev/null
+SWARMFORGE_WAKE_CMD="$FP/fake-wake" bb "$SCRIPTS/squadd.bb" "$FP" --once
+grep -q '^WAKE agent prompt squad-leader ' wakes.log \
+  || { cat wakes.log 2>/dev/null; fail "wake should reach the leader agent from roles.tsv"; }
+ok "wake command carries the leader agent name"
+
+# --- reviewer findings (squadd review) --------------------------------------
+# Failing tests for open defects; disabled so the suite stays green. Run
+# with SMOKE_FINDINGS=1 to watch them fail; the coder's fix enables them.
+if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
+
+step "FINDING: daemon merges into whatever branch is checked out, not main"
+# squadd merge! runs `git merge` in the project root with no branch check;
+# with a side branch checked out the assignment is marked :merged while
+# main never receives the commit — violating squad-s3.md's "sole owner of
+# the project's main branch" / "merge ... into the project's main branch".
+git checkout -qb work main
+echo feature > feature.txt
+git add feature.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "worker change"
+WC="$(git rev-parse --short=10 HEAD)"
+git checkout -q main
+"$SCRIPTS/squad_assign.sh" create wb1 implementer instr.md > /dev/null
+printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$WC" > wb1.handoff
+"$SCRIPTS/squad_assign.sh" result wb1 wb1.handoff > /dev/null
+"$SCRIPTS/squad_assign.sh" accept wb1 > /dev/null
+git checkout -qb side main
+bb "$SCRIPTS/squadd.bb" "$FP" --once
+if "$SCRIPTS/squad_assign.sh" status wb1 | grep -q 'STATE: merged'; then
+  git merge-base --is-ancestor "$WC" main \
+    || fail "assignment marked merged but its commit is not on main"
+fi
+ok "merged implies the commit landed on main"
+git checkout -q main
+
+step "FINDING: residual action change on a known target never re-wakes the leader"
+# check-residuals! dedups wake-ups by TARGET only. In the long-running
+# daemon, a target that moves review -> (accept, conflict) -> route-merger
+# between polls stays in known-residuals, so the new residual action is
+# suppressed and the leader is never told to route a merger. --once runs
+# cannot see this: each is a fresh process with an empty known-residuals.
+git checkout -qb xwork main
+echo "worker version" > f.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qam "x work"
+XC="$(git rev-parse --short=10 HEAD)"
+git checkout -q main
+echo "main moved on" > f.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qam "conflicting main change"
+"$SCRIPTS/squad_assign.sh" create fx1 implementer instr.md > /dev/null
+printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$XC" > fx1.handoff
+"$SCRIPTS/squad_assign.sh" result fx1 fx1.handoff > /dev/null
+rm -f wakes.log
+SWARMFORGE_WAKE_CMD="$FP/fake-wake" bb "$SCRIPTS/squadd.bb" "$FP" > /dev/null 2>&1 &
+SQDPID=$!
+sleep 3
+[ "$(grep -c '^WAKE ' wakes.log 2>/dev/null)" -eq 1 ] \
+  || fail "probe setup: expected exactly one wake for the review residual"
+"$SCRIPTS/squad_assign.sh" accept fx1 > /dev/null
+sleep 4
+mkdir -p .swarmforge/squad/daemon
+touch .swarmforge/squad/daemon/stop
+wait "$SQDPID" 2>/dev/null || true
+"$SCRIPTS/squad_next.sh" --residual-only | grep -q 'route-merger' \
+  || fail "probe setup: route-merger residual expected after the conflict"
+[ "$(grep -c '^WAKE ' wakes.log)" -ge 2 ] \
+  || fail "route-merger appeared on a known target but the leader was never re-woken"
+ok "new residual action on a known target re-wakes the leader"
+
+fi
+cd "$CODER"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"
