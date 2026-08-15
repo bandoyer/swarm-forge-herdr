@@ -160,7 +160,7 @@
         ;; herdr writes results to stdout but error JSON to stderr
         parsed (or (parse-json out) (parse-json err))]
     {:ok? (zero? exit)
-     :data (or parsed trimmed)
+     :data (or parsed (str/trim (str out)))
      :error-code (get-in parsed [:error :code])
      :error-message (or (get-in parsed [:error :message])
                         (str/trim (str out "\n" err)))}))
