@@ -26,7 +26,16 @@
 ;; --- worker records -------------------------------------------------------
 
 (defn workers-dir [] (fs/path (squad-lib/squad-dir) "workers"))
-(defn worker-file [worker-name] (fs/path (workers-dir) (str worker-name ".edn")))
+
+(defn worker-file
+  "Resolve a worker record path. Names are validated against herdr's
+  agent-name shape before touching the filesystem, so a hostile name can
+  never escape the workers directory (reviewer finding, worker-registry)."
+  [worker-name]
+  (when-not (re-matches #"[a-z][a-z0-9_-]{0,31}" (str worker-name))
+    (handoff-lib/die 2 (str "INVALID_WORKER_NAME: '" worker-name
+                            "' (expected lowercase name, max 32 chars)")))
+  (fs/path (workers-dir) (str worker-name ".edn")))
 
 (def active-states
   "States that occupy a worker slot and count against the capacity cap."

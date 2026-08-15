@@ -141,6 +141,14 @@ expect "contract: compliant commit queues" "HANDOFF QUEUED:" <<<"$OUT"
 rm -f draft.txt
 rm -rf "$CODER/swarmforge/contracts"
 
+step "squad: hostile worker names are rejected before path resolution"
+set +e
+OUT="$("$SCRIPTS/squad_worker.sh" retire '../assignments/a1/status' 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "traversal name should exit 2, got $STATUS"
+expect "traversal worker name rejected" "INVALID_WORKER_NAME" <<<"$OUT"
+
 step "done with nothing in process fails cleanly"
 set +e
 OUT="$(SWARMFORGE_ROLE=coder "$SCRIPTS/done_with_current.sh" 2>&1)"
