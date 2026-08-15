@@ -30,8 +30,10 @@ chain, not into your commit.
 
 Small and coherent: one slice of work per commit. Start the subject with
 your role in brackets — `[coder] add cave exit routing` — and keep it to
-the point. Commit only to your own worktree's branch; integration happens
-through handoffs, never through pushing to another role's branch.
+the point. No trailers or attribution footers (no Co-Authored-By,
+Generated-By, or similar); the subject and body say everything. Commit
+only to your own worktree's branch; integration happens through handoffs,
+never through pushing to another role's branch.
 
 ## Project specifics
 

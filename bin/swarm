@@ -3,6 +3,8 @@
 ;;
 ;; Usage (run from your project's root, inside a running `herdr` session):
 ;;   swarm init <pack>      copy a pack preset + prompts into the project
+;;   swarm switch <pack>    change packs: replace conf + pack article, add
+;;                          missing role prompts; project/toolset kept
 ;;   swarm toolset <name>   install a quality-toolset article (dotnet, clojure)
 ;;   swarm up               start worktrees, agents, and the handoff router
 ;;   swarm down             stop the router and close the swarm workspace
@@ -276,6 +278,16 @@
     (fs/copy source target)
     (println "Wrote" (str target))))
 
+(defn- install-role-prompts! [rows]
+  (let [prompts (fs/path tool-root "prompts")
+        target (fs/path project-root "swarmforge")]
+    (doseq [{:keys [role]} rows]
+      (let [prompt (fs/path prompts "roles" (str role ".prompt"))]
+        (if (fs/exists? prompt)
+          (install! prompt (fs/path target "roles" (str role ".prompt")))
+          (println "NOTE: no stock prompt for role" role "— write"
+                   (str target "/roles/" role ".prompt")))))))
+
 (defn init! [pack]
   (let [source (fs/path tool-root "packs" (str pack ".conf"))
         prompts (fs/path tool-root "prompts")
@@ -292,15 +304,28 @@
       (install! article (fs/path target "constitution" "articles" (fs/file-name article))))
     (install! (fs/path tool-root "packs" (str pack ".prompt"))
               (fs/path target "constitution" "articles" "pack.prompt"))
-    (doseq [{:keys [role]} (parse-conf)]
-      (let [prompt (fs/path prompts "roles" (str role ".prompt"))]
-        (if (fs/exists? prompt)
-          (install! prompt (fs/path target "roles" (str role ".prompt")))
-          (println "NOTE: no stock prompt for role" role "— write" (str target "/roles/" role ".prompt")))))
+    (install-role-prompts! (parse-conf))
     (println)
     (println "Next: edit swarmforge/constitution/articles/project.prompt for this project,")
     (println "review the agent kinds in swarmforge/swarmforge.conf,")
     (println "then run `swarm up` from a running herdr session.")))
+
+(defn switch! [pack]
+  (let [source (fs/path tool-root "packs" (str pack ".conf"))]
+    (when-not (and pack (fs/exists? source))
+      (die (str "Unknown pack: " pack)))
+    (when-not (fs/exists? conf-file)
+      (die "No swarm here yet — use `swarm init <pack>` instead."))
+    (fs/copy source conf-file {:replace-existing true})
+    (println "Replaced" (str conf-file))
+    (fs/copy (fs/path tool-root "packs" (str pack ".prompt"))
+             (fs/path project-root "swarmforge" "constitution" "articles" "pack.prompt")
+             {:replace-existing true})
+    (println "Replaced pack article.")
+    (install-role-prompts! (parse-conf))
+    (println)
+    (println "Switched to" (str pack ".") "Project and toolset articles kept.")
+    (println "Run `swarm up` — agents for roles that survive the switch are reused.")))
 
 (defn toolset! [name]
   (let [source (fs/path tool-root "toolsets" (str name ".edn"))]
@@ -387,6 +412,7 @@
 (defn -main [args]
   (case (first args)
     "init" (init! (second args))
+    "switch" (switch! (second args))
     "toolset" (toolset! (second args))
     "up" (up!)
     nil (up!)
