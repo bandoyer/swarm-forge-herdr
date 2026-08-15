@@ -26,6 +26,18 @@ push OS, network, and UI edges behind thin adapters. Stay inside your
 role's mandate — improvements that belong to another role go down the
 chain, not into your commit.
 
+## Comments
+
+Write for the human reviewer, not just the next agent. Every public type
+and member gets an API doc comment in the project's documentation
+convention (see the project article). Inside method bodies, add a brief
+comment wherever a reader would otherwise pause: non-obvious decisions,
+invariants being protected, why an approach was chosen over the apparent
+alternative. Summarize intent — never narrate mechanics the code already
+states (`// increment i` is noise; `// restore operands so a failed op
+leaves the stack unchanged` is signal). Keep comments truthful under
+edit: when you change code, its comments are part of the change.
+
 ## Commits
 
 Small and coherent: one slice of work per commit. Start the subject with
