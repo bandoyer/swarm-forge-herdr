@@ -67,15 +67,22 @@
               (die (format "Invalid role '%s': role names may not contain underscores." role)))
             (when (or (str/includes? worktree "/") (#{"." ".."} worktree))
               (die (format "Invalid worktree '%s' for role '%s'." worktree role)))
-            {:role role
-             :agent-kind agent-kind
-             :worktree-name worktree
-             :worktree-path (if (#{"master" "none"} worktree)
-                              (str project-root)
-                              (str (fs/path worktrees-dir worktree)))
-             :receive-mode mode
-             :extra-args (vec extra)}))]
-    (doseq [[value rows'] [[:role rows] [:worktree-name (remove #(#{"master" "none"} (:worktree-name %)) rows)]]
+            (let [agent-name (str/lower-case role)]
+              ;; Role names are protocol identifiers (upstream allows e.g. "QA");
+              ;; herdr agent names must be lowercase — keep them separate.
+              (when-not (re-matches #"[a-z][a-z0-9_-]{0,31}" agent-name)
+                (die (format "Role '%s' cannot be mapped to a herdr agent name (lowercase letters, digits, - or _)." role)))
+              {:role role
+               :agent-name agent-name
+               :agent-kind agent-kind
+               :worktree-name worktree
+               :worktree-path (if (#{"master" "none"} worktree)
+                                (str project-root)
+                                (str (fs/path worktrees-dir worktree)))
+               :receive-mode mode
+               :extra-args (vec extra)})))]
+    (doseq [[value rows'] [[:role rows] [:agent-name rows]
+                           [:worktree-name (remove #(#{"master" "none"} (:worktree-name %)) rows)]]
             [duplicate n] (frequencies (map value rows'))
             :when (> n 1)]
       (die (format "Duplicate %s '%s' in swarmforge.conf" (name value) duplicate)))
@@ -110,9 +117,9 @@
 (defn write-roles-tsv! [rows]
   (fs/create-dirs state-dir)
   (spit (str (fs/path state-dir "roles.tsv"))
-        (str/join "" (for [{:keys [role worktree-name worktree-path agent-kind receive-mode]} rows]
+        (str/join "" (for [{:keys [role agent-name worktree-name worktree-path agent-kind receive-mode]} rows]
                        (str (str/join "\t" [role worktree-name worktree-path
-                                            role role agent-kind receive-mode])
+                                            agent-name role agent-kind receive-mode])
                             "\n")))))
 
 (defn ensure-queue-dirs! [rows]
@@ -211,8 +218,8 @@
                            id))
         running (existing-agents)
         needs-attention (atom [])]
-    (doseq [{:keys [role agent-kind worktree-path extra-args]} rows]
-      (if (running role)
+    (doseq [{:keys [role agent-name agent-kind worktree-path extra-args]} rows]
+      (if (running agent-name)
         (println role "already running.")
         (let [_ (println "Starting" role (str "(" agent-kind ")") "in" worktree-path)
               tab (herdr "tab" "create"
@@ -222,11 +229,11 @@
                          "--env" (str "SWARMFORGE_ROLE=" role)
                          "--no-focus")
               pane-id (find-id tab "pane")
-              start (apply herdr-try "agent" "start" role "--kind" agent-kind "--pane" pane-id
+              start (apply herdr-try "agent" "start" agent-name "--kind" agent-kind "--pane" pane-id
                            (when (seq extra-args) (cons "--" extra-args)))]
           (cond
             (:ok? start)
-            (let [prompted (herdr-try "agent" "prompt" role (bootstrap-prompt role))]
+            (let [prompted (herdr-try "agent" "prompt" agent-name (bootstrap-prompt role))]
               (when-not (:ok? prompted)
                 (swap! needs-attention conj role)))
 
@@ -383,11 +390,13 @@
 
 (defn bootstrap! [role-arg]
   (let [rows (parse-conf)
-        targets (if role-arg (filter #(= role-arg (:role %)) rows) rows)]
+        targets (if role-arg
+                  (filter #(or (= role-arg (:role %)) (= role-arg (:agent-name %))) rows)
+                  rows)]
     (when (empty? targets)
       (die (str "Unknown role: " role-arg)))
-    (doseq [{:keys [role]} targets]
-      (herdr "agent" "prompt" role (bootstrap-prompt role))
+    (doseq [{:keys [role agent-name]} targets]
+      (herdr "agent" "prompt" agent-name (bootstrap-prompt role))
       (println "Sent role bootstrap to" role))))
 
 (defn down! []
