@@ -40,12 +40,14 @@ edit: when you change code, its comments are part of the change.
 
 ## Commits
 
-Small and coherent: one slice of work per commit. Start the subject with
-your role in brackets — `[coder] add cave exit routing` — and keep it to
-the point. No trailers or attribution footers (no Co-Authored-By,
-Generated-By, or similar); the subject and body say everything. Commit
-only to your own worktree's branch; integration happens through handoffs,
-never through pushing to another role's branch.
+Small and coherent: one slice of work per commit. Subjects are plain,
+succinct, and written for a human skimming history — say what changed,
+nothing else: `Add cave exit routing`. No role prefixes or tags (the
+swarm's audit trail already records who did what), and no trailers or
+attribution footers (no Co-Authored-By, Generated-By, or similar); the
+subject and body say everything. Evidence and reasoning go in the body.
+Commit only to your own worktree's branch; integration happens through
+handoffs, never through pushing to another role's branch.
 
 ## Project specifics
 

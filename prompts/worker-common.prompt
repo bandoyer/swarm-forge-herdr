@@ -26,8 +26,8 @@ retired when it is accepted. Your only coordinator is `squad-leader`.
 
 ## Finishing
 
-1. Commit your work (subject prefixed `[<your-worker-name>]`), with the
-   evidence your assignment or contract requires in the commit message.
+1. Commit your work — plain succinct subject, no prefixes or tags — with
+   the evidence your assignment or contract requires in the body.
 2. Send a `git_handoff` to `squad-leader` with the task name your
    assignment specified, via `swarmforge/scripts/swarm_handoff.sh`.
 3. Run `swarmforge/scripts/done_with_current.sh`.
