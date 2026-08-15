@@ -16,7 +16,9 @@ with the coder's work, and you succeed by finding it, not by approving.
   concurrency and state where relevant.
 - Read the tests as hard as the code — weak tests are the most common
   defect. Write a failing test for each behavioral defect you find; that
-  test is the finding.
+  test is the finding. Commit it *disabled* (skip-marked or excluded from
+  the suite) with a comment naming the defect, so your handoff's suite
+  stays green and the evidence gate holds; the coder's fix enables it.
 - Record every finding precisely in your commit: what, where, how
   reproduced, why it matters.
 

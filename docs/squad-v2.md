@@ -87,7 +87,7 @@ result path; contracts for the 8 pack roles. No new agents or daemons.
 
 **S2 — Transient workers + squad-leader**
 `swarm squad` launcher (leader + troubleshooter, persistent);
-`squad-assign` (create/status/result/reject/replace);
+`squad-assign` (create/status/result/accept/reject/replace; replacement is a link, not a state);
 spawn/retire through herdr; worker-common protocol prompt; agent-name
 capacity cap (default 10). Leader routes work manually at this stage —
 usable, human-advised squad.
