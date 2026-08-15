@@ -153,9 +153,12 @@
   :error-message}; :data is parsed JSON when the output is JSON."
   [& args]
   (let [{:keys [exit out err]} (apply process/sh {:continue true} "herdr" args)
-        trimmed (str/trim (str out))
-        parsed (when (or (str/starts-with? trimmed "{") (str/starts-with? trimmed "["))
-                 (try (json/parse-string trimmed true) (catch Exception _ nil)))]
+        parse-json (fn [s]
+                     (let [trimmed (str/trim (str s))]
+                       (when (or (str/starts-with? trimmed "{") (str/starts-with? trimmed "["))
+                         (try (json/parse-string trimmed true) (catch Exception _ nil)))))
+        ;; herdr writes results to stdout but error JSON to stderr
+        parsed (or (parse-json out) (parse-json err))]
     {:ok? (zero? exit)
      :data (or parsed trimmed)
      :error-code (get-in parsed [:error :code])
