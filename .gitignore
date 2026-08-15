@@ -1,0 +1,11 @@
+# swarm runtime state (per-project, never committed)
+.swarm/
+
+# imported upstream content (fetched, not redistributed)
+upstream/
+
+# editor/OS noise
+.idea/
+.vscode/
+*~
+.DS_Store
