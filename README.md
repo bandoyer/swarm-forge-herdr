@@ -6,8 +6,27 @@ role-based AI agent swarms — specifier → architect → coder → refactorer 
 each in its own git worktree, handing work down the chain as validated commits,
 running on herdr's agent-aware terminal runtime instead of tmux.
 
-> **Status: early development.** Phase 0 (scaffolding). Nothing runs yet.
-> See [PLAN.md](PLAN.md) for the roadmap.
+> **Status: v1 — all four packs validated live** (two, four, six,
+> adversaries) with real Claude agents on a .NET project: full handoff
+> chains, batch mode, terminal broadcasts, and the evidence regime
+> (coverage, CRAP ≤ 6, mutation testing) all proven end-to-end.
+> See [PLAN.md](PLAN.md) for history and the v2 roadmap.
+
+## Quickstart
+
+```sh
+git clone https://github.com/bandoyer/swarm-forge-herdr
+ln -s "$PWD/swarm-forge-herdr/bin/swarm" ~/.local/bin/swarm
+
+cd your-project            # a git repo
+swarm init two             # or four | six | adversaries
+swarm toolset dotnet       # optional: quality-tool commands + doctor
+# edit swarmforge/constitution/articles/project.prompt for your project
+herdr                      # start herdr, then in any pane:
+swarm up
+herdr agent prompt coder "Task 'first-slice': ..."
+swarm logs                 # one interleaved timeline of everything
+```
 
 ## Why
 
