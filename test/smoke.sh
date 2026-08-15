@@ -796,11 +796,7 @@ ok "S4 rows fire in table order"
 rm swarmforge/squad.conf
 cd "$CODER"
 
-# Reviewer findings on aa31e6bf64 (S4 slice A) — committed disabled; run
-# with SMOKE_FINDINGS=1 to watch them fail; the coder's fix enables them.
-if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
-
-step "FINDING: superseded rejection fires row 13 alongside the row-5* merge"
+step "advisor: approved re-request supersedes a rejection (rows 5*/13)"
 # rejected ap1 + later approved ap2 for the same target: row 5* releases
 # the merge (mechanical, daemon-applied) while row 13 simultaneously tells
 # the leader to reject/rework the same assignment — contradictory advice
@@ -826,7 +822,7 @@ fi
 ok "superseded rejection does not contradict the released merge"
 cd "$CODER"
 
-step "FINDING: interrupted theme create wedges the theme id"
+step "theme: create recovers from a crash-interrupted create"
 # A theme dir without status.edn (create interrupted between create-dirs
 # and write-record!) is unrecoverable: create says THEME_EXISTS, while
 # status/attach say NO_SUCH_THEME, and no tool can repair it. The
@@ -843,8 +839,6 @@ expect "create recovers a half-created theme" "THEME_CREATED: thwedge" <<<"$OUT"
 OUT="$("$SCRIPTS/squad_theme.sh" status thwedge)"
 expect "recovered theme has a readable status" "THEME: thwedge" <<<"$OUT"
 rm -f thwedge.md
-
-fi
 
 step "squadd: simulator project (leader row, scripted workers, no agents)"
 SQ="$WORK/squadproj"

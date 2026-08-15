@@ -35,12 +35,16 @@
 
 (defn create! [theme-id theme-file]
   (let [dir (theme-dir theme-id)]
-    (when (fs/exists? dir)
+    ;; status.edn is the theme's record of existence, written last: a dir
+    ;; without it is a create that crashed mid-write, and re-running create
+    ;; must succeed rather than wedge the id between THEME_EXISTS here and
+    ;; NO_SUCH_THEME everywhere else (reviewer finding, squad-approvals).
+    (when (fs/exists? (theme-status-file theme-id))
       (handoff-lib/die 2 (str "THEME_EXISTS: " theme-id)))
     (when-not (fs/regular-file? theme-file)
       (handoff-lib/die 1 (str "Theme file not found: " theme-file)))
     (fs/create-dirs dir)
-    (fs/copy theme-file (fs/path dir "theme.md"))
+    (fs/copy theme-file (fs/path dir "theme.md") {:replace-existing true})
     (squad-lib/write-record! (theme-status-file theme-id)
                              {:id theme-id
                               :assignments []
