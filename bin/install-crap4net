@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# install-crap4net — pack and install crap4net as a global dotnet tool.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$DIR/tools/crap4net/src"
+dotnet pack "$SRC" -c Release -o "$SRC/nupkg" --nologo -v q
+dotnet tool update --global crap4net --add-source "$SRC/nupkg" --no-cache
+echo "Installed: $(crap4net --help 2>/dev/null | head -1 || echo 'restart your shell so ~/.dotnet/tools is on PATH')"

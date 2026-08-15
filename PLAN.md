@@ -42,11 +42,13 @@ Original text (upstream is unlicensed), same methodology. Done 2026-08-15.
 - Packs as config presets; `swarm init <pack>` installs conf + prompts
 - `bin/import-upstream` — fetch upstream's originals for users who want them
 
-## Phase 3 — Toolset profiles
+## Phase 3 — Toolset profiles ✅
 
-Tool table keyed by *purpose* (`test`, `coverage`, `mutation`, `crap`, `dry`,
-`boundaries`, `acceptance`); role contracts require purposes; profiles bind
-purposes to commands.
+Done 2026-08-15. `toolsets/*.edn` keyed by purpose; `swarm toolset <name>`
+renders a constitution article with exact commands and runs a doctor pass.
+`crap4net` built under `tools/crap4net` (Roslyn + lcov, 16 tests green,
+installable via `bin/install-crap4net`, dogfooded on itself). dotnet doctor
+fully green on this machine (dotnet, stryker, crap4net, jscpd).
 
 ### `toolsets/clojure` — upstream's own tools
 

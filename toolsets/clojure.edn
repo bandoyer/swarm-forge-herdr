@@ -1,0 +1,41 @@
+{:name "clojure"
+ :description "Upstream swarm-forge's own quality toolset (Clojure/Babashka projects). Tools are unclebob's; install clones them locally — nothing is redistributed here."
+ :purposes
+ {:test
+  {:command "bb test"
+   :notes "Project bb task for the unit suite."}
+
+  :coverage
+  {:command "bb coverage"
+   :notes "Must produce target/coverage/lcov.info; regenerate before any coverage-derived metric."}
+
+  :mutation
+  {:command "mutate"
+   :install "clone https://github.com/unclebob/clj-mutate and shim its bb task onto PATH"
+   :notes "Prefer --reuse-lcov only immediately after a successful coverage run."}
+
+  :crap
+  {:command "crap"
+   :install "clone https://github.com/unclebob/crap4clj and shim its bb task onto PATH"
+   :notes "Bar: every function <= 6, only valid against fresh lcov."}
+
+  :dry
+  {:command "deintroverter"
+   :install "clone https://github.com/unclebob/dry4clj and shim its bb task onto PATH"}
+
+  :boundaries
+  {:command "check-dependencies"
+   :install "clone https://github.com/unclebob/dependency-checker and shim its bb task onto PATH"}
+
+  :acceptance
+  {:command "bb acceptance"
+   :install "clone https://github.com/unclebob/Acceptance-Pipeline-Specification for gherkin-parser / gherkin-mutator"
+   :notes "gherkin-mutator needs the NDJSON worker (bb acceptance-worker), not the human suite."}}
+
+ :doctor
+ [["bb" "--version"]
+  ["mutate" "--help"]
+  ["crap" "--help"]
+  ["deintroverter" "--help"]
+  ["check-dependencies" "--help"]
+  ["gherkin-parser" "--help"]]}

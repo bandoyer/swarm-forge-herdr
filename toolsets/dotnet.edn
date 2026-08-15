@@ -1,0 +1,39 @@
+{:name "dotnet"
+ :description "Quality toolset for C# / .NET projects."
+ :purposes
+ {:test
+  {:command "dotnet test"
+   :notes "Full unit suite; green before any handoff."}
+
+  :coverage
+  {:command "dotnet test --collect:\"XPlat Code Coverage;Format=lcov\""
+   :notes "coverlet writes lcov to <tests>/TestResults/<run-id>/coverage.info. Regenerate before reading any coverage-derived metric; stale coverage invalidates everything built on it."}
+
+  :mutation
+  {:command "dotnet stryker"
+   :install "dotnet tool install --global dotnet-stryker"
+   :notes "Run from the test project directory. Surviving mutants in the slice's scope are work: kill them with better tests or record precisely why each survivor is unkillable."}
+
+  :crap
+  {:command "crap4net --lcov <coverage.info> <source-dir>"
+   :install "bin/install-crap4net (from the swarm-forge-herdr checkout)"
+   :notes "CRAP = complexity^2 x (1-coverage)^3 + complexity, computed per method from source + lcov. Bar: every method <= 6 (exit 2 lists offenders). Requires fresh coverage first."}
+
+  :dry
+  {:command "jscpd --min-tokens 50 --reporters console <source-dir>"
+   :install "npm install -g jscpd"
+   :notes "Duplication within the slice's scope gets removed or explicitly justified."}
+
+  :boundaries
+  {:command "dotnet test <arch-tests-project>"
+   :notes "Architecture rules as NetArchTest.Rules (or ArchUnitNET) tests in a dedicated test project; failures are blocking."}
+
+  :acceptance
+  {:command "dotnet test <acceptance-project>"
+   :notes "Reqnroll for Gherkin acceptance. Do NOT use SpecFlow (discontinued 2024); do not let an agent add it."}}
+
+ :doctor
+ [["dotnet" "--version"]
+  ["dotnet" "stryker" "--help"]
+  ["crap4net" "--help"]
+  ["jscpd" "--version"]]}

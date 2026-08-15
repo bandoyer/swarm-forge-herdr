@@ -2,10 +2,11 @@
 ;; swarm — launch a SwarmForge-style role swarm on the herdr runtime.
 ;;
 ;; Usage (run from your project's root, inside a running `herdr` session):
-;;   swarm init <pack>   copy a pack preset to swarmforge/swarmforge.conf
-;;   swarm up            start worktrees, agents, and the handoff router
-;;   swarm down          stop the router and close the swarm workspace
-;;   swarm status        show swarm runtime state
+;;   swarm init <pack>      copy a pack preset + prompts into the project
+;;   swarm toolset <name>   install a quality-toolset article (dotnet, clojure)
+;;   swarm up               start worktrees, agents, and the handoff router
+;;   swarm down             stop the router and close the swarm workspace
+;;   swarm status           show swarm runtime state
 ;;
 ;; swarmforge.conf format (upstream-compatible):
 ;;   window <role> <agent-kind> <worktree> [task|batch] [extra-cli-args...]
@@ -15,6 +16,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
             [clojure.string :as str]))
 
 (def tool-root (-> *file* fs/real-path fs/parent fs/parent))
@@ -252,6 +254,38 @@
     (println "review the agent kinds in swarmforge/swarmforge.conf,")
     (println "then run `swarm up` from a running herdr session.")))
 
+(defn toolset! [name]
+  (let [source (fs/path tool-root "toolsets" (str name ".edn"))]
+    (when-not (and name (fs/exists? source))
+      (die (str "Unknown toolset: " name)
+           (str "Available: " (str/join ", " (sort (keep #(second (re-matches #"(.+)\.edn" (fs/file-name %)))
+                                                         (fs/list-dir (fs/path tool-root "toolsets"))))))))
+    (let [{:keys [description purposes doctor]} (edn/read-string (slurp (str source)))
+          article (fs/path project-root "swarmforge" "constitution" "articles" "toolset.prompt")]
+      (fs/create-dirs (fs/parent article))
+      (spit (str article)
+            (str "# Article: Toolset (" name ")\n\n"
+                 description "\n\n"
+                 "These are the project's quality tools. Where a role prompt names a\n"
+                 "purpose (coverage, mutation, crap, dry, boundaries, acceptance), use\n"
+                 "exactly the command below — no substitutes.\n\n"
+                 (str/join "\n"
+                           (for [[purpose {:keys [command notes]}] (sort-by key purposes)]
+                             (str "## " (clojure.core/name purpose) "\n\n"
+                                  "    " command "\n"
+                                  (when notes (str "\n" notes "\n")))))))
+      (println "Wrote" (str article))
+      (println)
+      (println "Doctor:")
+      (doseq [[cmd :as check] doctor]
+        (let [{:keys [exit]} (try (apply process/sh {:continue true} check)
+                                  (catch Exception _ {:exit 127}))]
+          (println (format "  %-9s %s" (if (zero? exit) "ok" "MISSING") (str/join " " check)))
+          (when-not (zero? exit)
+            (when-let [install (some #(when (str/includes? (str (:install %)) cmd) (:install %))
+                                     (vals purposes))]
+              (println "           install:" install))))))))
+
 (defn up! []
   (when-not (fs/exists? (fs/path project-root ".git"))
     (die "Run swarm from the root of a git repository."))
@@ -289,11 +323,12 @@
 (defn -main [args]
   (case (first args)
     "init" (init! (second args))
+    "toolset" (toolset! (second args))
     "up" (up!)
     nil (up!)
     "down" (down!)
     "status" (status!)
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | up | down | status]")))
+         "Usage: swarm [init <pack> | toolset <name> | up | down | status]")))
 
 (-main *command-line-args*)

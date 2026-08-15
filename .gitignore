@@ -9,3 +9,7 @@ upstream/
 .vscode/
 *~
 .DS_Store
+tools/**/bin/
+tools/**/obj/
+tools/**/TestResults/
+tools/**/nupkg/
