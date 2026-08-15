@@ -182,10 +182,12 @@
         (die (str "Could not find a " hint " id in herdr output:")
              (json/generate-string data)))))
 
-(defn bootstrap-prompt [role]
+(defn bootstrap-prompt [role worktree-path]
   (let [role-prompt (fs/path project-root "swarmforge" "roles" (str role ".prompt"))
         constitution (fs/path project-root "swarmforge" "constitution.prompt")]
     (str "You are the '" role "' role in a SwarmForge-style swarm. "
+         "Your registered worktree is " worktree-path " — do ALL work there, "
+         "even if other role worktrees exist on disk. "
          (if (fs/exists? constitution)
            (str "Read swarmforge/constitution.prompt"
                 (when (fs/exists? role-prompt)
@@ -245,7 +247,7 @@
                            (when (seq extra-args) (cons "--" extra-args)))]
           (cond
             (:ok? start)
-            (let [prompted (herdr-try "agent" "prompt" agent-name (bootstrap-prompt role))]
+            (let [prompted (herdr-try "agent" "prompt" agent-name (bootstrap-prompt role worktree-path))]
               (slog! "up: started" role "as" agent-name "in pane" pane-id)
               (when-not (:ok? prompted)
                 (slog! "up: bootstrap prompt failed for" role)
@@ -346,7 +348,16 @@
              (fs/path project-root "swarmforge" "constitution" "articles" "pack.prompt")
              {:replace-existing true})
     (println "Replaced pack article.")
-    (install-role-prompts! (parse-conf))
+    (let [rows (parse-conf)
+          active (set (map :worktree-name rows))
+          stale (when (fs/exists? worktrees-dir)
+                  (remove #(active (fs/file-name %)) (fs/list-dir worktrees-dir)))]
+      (install-role-prompts! rows)
+      (when (seq stale)
+        (println)
+        (println "NOTE: stale worktrees from a previous pack (agents will be told to")
+        (println "ignore them; remove with `git worktree remove <path>` if unwanted):")
+        (doseq [path stale] (println "  " (str path)))))
     (println)
     (println "Switched to" (str pack ".") "Project and toolset articles kept.")
     (println "Run `swarm up` — agents for roles that survive the switch are reused.")))
@@ -412,8 +423,8 @@
                   rows)]
     (when (empty? targets)
       (die (str "Unknown role: " role-arg)))
-    (doseq [{:keys [role agent-name]} targets]
-      (herdr "agent" "prompt" agent-name (bootstrap-prompt role))
+    (doseq [{:keys [role agent-name worktree-path]} targets]
+      (herdr "agent" "prompt" agent-name (bootstrap-prompt role worktree-path))
       (println "Sent role bootstrap to" role))))
 
 (defn down! []

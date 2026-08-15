@@ -88,6 +88,20 @@
 (defn role-known? [role-name]
   (boolean (some #(= role-name (:role %)) (roles))))
 
+(defn assert-role-worktree!
+  "Queue commands must run inside the role's registered worktree; a stale
+  worktree from a previous pack silently strands handoffs otherwise."
+  []
+  (let [entry (role-entry (current-role))
+        here (str (fs/canonicalize (fs/cwd)))
+        registered (str (fs/canonicalize (:worktree-path entry)))]
+    (when-not (= here registered)
+      (die 2 (str "WRONG_WORKTREE: role '" (:role entry) "' is registered at")
+           (str "  " registered)
+           (str "but this command ran in")
+           (str "  " here)
+           "cd to the registered worktree and retry."))))
+
 ;; ---------------------------------------------------------------------------
 ;; Timestamps
 
@@ -230,6 +244,7 @@
 (defn ready-task!
   "Accept or resume the current task. Prints TASK/NO_TASK."
   []
+  (assert-role-worktree!)
   (let [inbox (inbox-dir)
         new-dir (fs/path inbox "new")
         in-process (fs/path inbox "in_process")]
@@ -259,6 +274,7 @@
 (defn done-task!
   "Complete the current task, then chain into ready-task!."
   []
+  (assert-role-worktree!)
   (let [inbox (inbox-dir)
         in-process (fs/path inbox "in_process")
         completed (fs/path inbox "completed")]
@@ -294,6 +310,7 @@
   "Accept or resume the current batch: every queued handoff sharing the
   first file's priority. Prints BATCH/NO_TASK."
   []
+  (assert-role-worktree!)
   (let [inbox (inbox-dir)
         new-dir (fs/path inbox "new")
         in-process (fs/path inbox "in_process")]
@@ -327,6 +344,7 @@
 (defn done-batch!
   "Complete the current batch, then chain into ready-batch!."
   []
+  (assert-role-worktree!)
   (let [inbox (inbox-dir)
         in-process (fs/path inbox "in_process")
         completed (fs/path inbox "completed")]

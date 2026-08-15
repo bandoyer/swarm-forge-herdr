@@ -201,6 +201,7 @@
     (let [sender (handoff-lib/current-role)]
       (when-not (handoff-lib/role-known? sender)
         (handoff-lib/die 1 (str "Unknown sender role: " sender)))
+      (handoff-lib/assert-role-worktree!)
       (let [{:keys [headers errors]} (parse-draft draft)
             validation (validate headers)
             all-errors (into errors (:errors validation))]
