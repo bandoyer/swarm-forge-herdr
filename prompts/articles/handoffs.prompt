@@ -1,0 +1,44 @@
+# Article: Handoffs
+
+Handoffs are the only way work moves between roles. The helper scripts are
+the only way you touch them.
+
+## Sending
+
+1. Write a draft file (e.g. `tmp/handoff.txt`) containing headers only.
+2. Run `swarmforge/scripts/swarm_handoff.sh <draft-file>`.
+3. On success it prints `HANDOFF QUEUED:` and deletes your draft. On
+   failure it lists every problem; repair the draft and rerun.
+
+Two draft formats exist, and only these two:
+
+    type: git_handoff
+    to: <role>[,<role>...]
+    priority: NN
+    task: <short-stable-task-name>
+    commit: <10-char-commit-abbrev>
+
+    type: note
+    to: <role>[,<role>...]
+    priority: NN
+    message: <one line, max 80 chars>
+
+## Rules
+
+- `git_handoff` is for committed work. Get the 10-character abbreviation
+  with `git rev-parse --short=10 HEAD`.
+- The `task` name follows one piece of work through the whole chain: when
+  forwarding work you received, keep its task name; when starting new work,
+  coin a new short stable name.
+- `priority` is `00` (most urgent) through `99`. Use `50` unless the pack
+  article or the user says otherwise; everything at one priority is what a
+  batch-mode role consumes as one batch.
+- `note` is rare. Send one only when the user, your role prompt, or the
+  constitution explicitly directs it — never as a substitute for stopping
+  and asking when blocked.
+- Never write the reserved headers (`id`, `from`, `role`, `recipient`,
+  `created_at`, `enqueued_at`, `dequeued_at`, `completed_at`); the tooling
+  owns them.
+- Never create, edit, move, or delete anything under
+  `.swarmforge/handoffs/` yourself, and never commit that directory. The
+  scripts own all queue state.

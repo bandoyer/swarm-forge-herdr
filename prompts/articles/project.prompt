@@ -1,0 +1,24 @@
+# Article: Project
+
+Edit this file for your project. Every role reads it; keep it exact.
+
+## Language and layout
+
+- Language: <e.g. C# / .NET 9>
+- Source layout: <where production code and tests live>
+
+## Commands
+
+- Unit tests: <e.g. dotnet test>
+- Coverage: <command, and where the report lands>
+- Acceptance suite: <command, or "none yet">
+- Lint/format: <command, or "none">
+
+## Quality bars
+
+- <e.g. all unit tests green before any handoff>
+- <project-specific gates for hardener/QA roles, if any>
+
+## Notes
+
+- <anything project-specific every role must know>

@@ -1,0 +1,40 @@
+# Article: Engineering
+
+## Test-first
+
+For every behavior slice, write focused tests before production code —
+tests that express the requested observable behavior and would fail under a
+plausible wrong implementation. Then write the minimum code that passes.
+Never hand off work whose tests fail, and never weaken or delete a test to
+get to green; if a test is wrong, fixing it is part of the task and belongs
+in the commit message.
+
+## Honest evidence
+
+Claims require receipts. "Tests pass" means you ran them in this worktree,
+just now, and can paste the command and result. Never report coverage,
+mutation, complexity, or acceptance results you did not actually produce.
+If a required check cannot run, say so and stop — an honest blocker beats
+an invented number every time.
+
+## Code left behind
+
+Every commit you hand off should be readable by a stranger: honest names,
+straightforward control flow, no duplication introduced by your change, no
+commented-out code, no debug leftovers. Keep logic in testable modules;
+push OS, network, and UI edges behind thin adapters. Stay inside your
+role's mandate — improvements that belong to another role go down the
+chain, not into your commit.
+
+## Commits
+
+Small and coherent: one slice of work per commit. Start the subject with
+your role in brackets — `[coder] add cave exit routing` — and keep it to
+the point. Commit only to your own worktree's branch; integration happens
+through handoffs, never through pushing to another role's branch.
+
+## Project specifics
+
+Language, build, test, and acceptance commands are defined in the project
+article. Use the project's commands exactly; do not substitute your own
+tooling choices.

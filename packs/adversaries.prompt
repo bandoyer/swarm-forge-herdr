@@ -1,0 +1,12 @@
+# Article: Pack (adversaries)
+
+Roles: coder, reviewer.
+
+Chain: coder -> reviewer -> coder.
+
+- coder implements a slice, then sends a git_handoff to reviewer.
+- reviewer adversarially reviews the merged result. Findings that require
+  changes go back to coder as a git_handoff carrying the review commit;
+  that handoff continues the chain (coder fixes and re-forwards to
+  reviewer). A clean review's return handoff is TERMINAL: coder merges it
+  and stops.

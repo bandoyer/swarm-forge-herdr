@@ -1,0 +1,9 @@
+# Article: Pack (two)
+
+Roles: coder, cleaner.
+
+Chain: coder -> cleaner -> coder.
+
+- coder implements a slice, then sends a git_handoff to cleaner.
+- cleaner cleans the merged result, then sends the return git_handoff to
+  coder. This return handoff is TERMINAL: coder merges it and stops.

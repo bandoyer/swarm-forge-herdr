@@ -220,18 +220,37 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
+(defn- install! [source target]
+  (when-not (fs/exists? target)
+    (fs/create-dirs (fs/parent target))
+    (fs/copy source target)
+    (println "Wrote" (str target))))
+
 (defn init! [pack]
-  (let [source (fs/path tool-root "packs" (str pack ".conf"))]
+  (let [source (fs/path tool-root "packs" (str pack ".conf"))
+        prompts (fs/path tool-root "prompts")
+        target (fs/path project-root "swarmforge")]
     (when-not (and pack (fs/exists? source))
       (die (str "Unknown pack: " pack)
-           (str "Available: " (str/join ", " (map #(str/replace (fs/file-name %) #"\.conf$" "")
-                                                  (fs/list-dir (fs/path tool-root "packs")))))))
+           (str "Available: " (str/join ", " (sort (keep #(second (re-matches #"(.+)\.conf" (fs/file-name %)))
+                                                         (fs/list-dir (fs/path tool-root "packs"))))))))
     (when (fs/exists? conf-file)
       (die (str conf-file " already exists; edit it or remove it first.")))
-    (fs/create-dirs (fs/parent conf-file))
-    (fs/copy source conf-file)
-    (println "Wrote" (str conf-file))
-    (println "Review the agent kinds in it, then run `swarm up` from a running herdr session.")))
+    (install! source conf-file)
+    (install! (fs/path prompts "constitution.prompt") (fs/path target "constitution.prompt"))
+    (doseq [article (fs/list-dir (fs/path prompts "articles"))]
+      (install! article (fs/path target "constitution" "articles" (fs/file-name article))))
+    (install! (fs/path tool-root "packs" (str pack ".prompt"))
+              (fs/path target "constitution" "articles" "pack.prompt"))
+    (doseq [{:keys [role]} (parse-conf)]
+      (let [prompt (fs/path prompts "roles" (str role ".prompt"))]
+        (if (fs/exists? prompt)
+          (install! prompt (fs/path target "roles" (str role ".prompt")))
+          (println "NOTE: no stock prompt for role" role "— write" (str target "/roles/" role ".prompt")))))
+    (println)
+    (println "Next: edit swarmforge/constitution/articles/project.prompt for this project,")
+    (println "review the agent kinds in swarmforge/swarmforge.conf,")
+    (println "then run `swarm up` from a running herdr session.")))
 
 (defn up! []
   (when-not (fs/exists? (fs/path project-root ".git"))

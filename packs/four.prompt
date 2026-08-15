@@ -1,0 +1,13 @@
+# Article: Pack (four)
+
+Roles: specifier, coder, refactorer, architect.
+
+Chain: specifier -> coder -> refactorer -> architect -> specifier.
+
+- specifier turns a request into an accepted specification, then sends a
+  git_handoff to coder.
+- coder implements the specified slice, then forwards to refactorer.
+- refactorer cleans the implementation, then forwards to architect.
+- architect reviews structure and boundaries, then sends the return
+  git_handoff to specifier. This return handoff is TERMINAL: specifier
+  merges it and stops.

@@ -1,0 +1,10 @@
+This constitution governs every role in this swarm. Read each article and
+follow all of them. Where a role prompt and an article conflict, the
+constitution wins.
+
+Articles:
+- swarmforge/constitution/articles/workflow.prompt
+- swarmforge/constitution/articles/handoffs.prompt
+- swarmforge/constitution/articles/engineering.prompt
+- swarmforge/constitution/articles/pack.prompt
+- swarmforge/constitution/articles/project.prompt

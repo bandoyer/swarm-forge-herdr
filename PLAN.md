@@ -31,14 +31,16 @@ agents still unvalidated — that is Phase 4.
 
 Estimate: ~800–1200 lines (upstream ~2–3k minus deletions).
 
-## Phase 2 — Prompt corpus
+## Phase 2 — Prompt corpus ✅
 
-Original text (upstream is unlicensed), same methodology.
+Original text (upstream is unlicensed), same methodology. Done 2026-08-15.
 
-- Constitution: `constitution.prompt` + articles: `workflow`, `handoffs`, `engineering`, `project` (template)
-- Roles: `specifier`, `architect`, `coder`, `refactorer`, `cleaner`, `hardener`, `qa`, `reviewer`
-- Packs as config presets: `packs/two.conf`, `four.conf`, `six.conf`, `adversaries.conf`
-- `import-upstream.sh` — fetch upstream's pack tarballs (their documented install path) for users wanting the originals
+- Constitution + articles: `workflow`, `handoffs`, `engineering`, `project`
+  (template), plus a per-pack `pack.prompt` chain article
+- Roles: `specifier`, `architect`, `coder`, `refactorer`, `cleaner`,
+  `hardener`, `QA`, `reviewer`
+- Packs as config presets; `swarm init <pack>` installs conf + prompts
+- `bin/import-upstream` — fetch upstream's originals for users who want them
 
 ## Phase 3 — Toolset profiles
 

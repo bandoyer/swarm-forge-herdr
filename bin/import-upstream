@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# import-upstream — fetch upstream swarm-forge's prompt files into this
+# project, replacing the stock prompts installed by `swarm init`.
+#
+# This downloads a pack branch straight from unclebob/swarm-forge (its own
+# documented install path) at your machine; nothing upstream is
+# redistributed by this repository. Runtime scripts are NOT imported — this
+# port provides protocol-compatible ones.
+#
+# Usage: import-upstream <two-pack|four-pack|six-pack|adversaries|squad>
+set -euo pipefail
+
+BRANCH="${1:-}"
+[ -n "$BRANCH" ] || { echo "Usage: import-upstream <upstream-branch>" >&2; exit 1; }
+[ -d .git ] || { echo "Run from your project root." >&2; exit 1; }
+
+URL="https://github.com/unclebob/swarm-forge/archive/refs/heads/$BRANCH.tar.gz"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+echo "Fetching $URL"
+curl -fsSL "$URL" | tar -xz --strip-components=1 -C "$WORK"
+
+mkdir -p swarmforge
+for path in constitution.prompt constitution roles handoff-protocol.md; do
+  if [ -e "$WORK/swarmforge/$path" ]; then
+    rm -rf "swarmforge/$path"
+    cp -r "$WORK/swarmforge/$path" "swarmforge/$path"
+    echo "Imported swarmforge/$path"
+  fi
+done
+
+echo
+echo "Upstream prompts installed. Notes:"
+echo "- Their conf was NOT imported; keep your swarmforge/swarmforge.conf"
+echo "  (watch role-name differences, e.g. upstream six-pack spells it 'hardender')."
+echo "- Their prompts may reference upstream-specific tools (APS, clj-mutate...);"
+echo "  see the toolset docs for installing those."
