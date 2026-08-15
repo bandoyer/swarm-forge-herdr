@@ -107,7 +107,13 @@ stale-worktree warning in `swarm switch`.
   (stale requests, events.log injection, wrong-branch merge, commit-header
   injection); operator-built leader authority downgrade + merger
   template/contract. 158 smoke checks. Live S3 dogfood passed 2026-08-15: leader records-only, daemon spawned/merged/retired; universal-bars fix applied.
-- [ ] S4 themes, approvals (CLI + herdr notifications), reporting
+- [x] S4 approvals, themes, reporting (2026-08-15): swarm-built
+  `squad_approval` + `squad_theme` + advisor rows 11-13/5*; operator-built
+  daemon one-shot user notifications, `swarm squad
+  approvals/approve/deny/report`, leader approval protocol. 222 smoke
+  checks. Validated live: accepted work held un-merged until the human
+  approved from the CLI; merge landed 200ms after signature.
+  **Squad v2 complete.**
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 
 ## Decisions log
