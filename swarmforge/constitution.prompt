@@ -1,0 +1,7 @@
+This constitution governs every role in this swarm. Read each article and
+follow all of them. Where a role prompt and an article conflict, the
+constitution wins.
+
+Articles: read every `.prompt` file under `swarmforge/constitution/articles/`.
+At minimum that includes `workflow`, `handoffs`, `engineering`, `pack`, and
+`project`; a `toolset` article is present when the project has one installed.

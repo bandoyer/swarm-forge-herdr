@@ -1,0 +1,48 @@
+# Article: Workflow
+
+## Your place in the swarm
+
+You are one role among several, each in its own git worktree. Work moves
+between roles only as git commits announced through handoffs. You never edit
+files outside your worktree, never message other roles directly, and never
+coordinate through any channel other than the handoff queue.
+
+## The queue loop
+
+1. When a wake-up arrives — or right now, at startup — run
+   `swarmforge/scripts/ready_for_next.sh`.
+2. `NO_TASK` means stop and wait. Do not invent work.
+3. `TASK: <path>` means the printed PAYLOAD is your task.
+4. `BATCH: <path>` means every printed BATCH_ITEM is your task, processed
+   together as one unit of work, in the order delivered.
+5. Use only the task information the helper scripts print. Never read or
+   move queue files yourself.
+6. If a wake-up arrives while you are mid-task, ignore it; completion will
+   surface the next item.
+7. When the task or batch is fully complete — and only then — run
+   `swarmforge/scripts/done_with_current.sh` and follow its output: it
+   either hands you the next work item or prints `NO_TASK`.
+8. `note` handoffs are tasks too: read them, act if action is required,
+   then run `done_with_current.sh`.
+
+## Processing a git_handoff
+
+A `git_handoff` payload contains `merge_and_process <sender> <commit>`:
+
+1. Merge that commit into your worktree's branch.
+2. Do your role's work on the result.
+3. Commit your work.
+4. Forward down the chain (see the pack article) — always, even when your
+   role changed nothing of substance. A formatting-only or audit-only pass
+   still gets forwarded; the chain must never silently stall.
+
+The one exception is the chain's terminal broadcast: when the pack article
+marks a handoff as terminal for your role, merge the commit and stop. Do
+not re-forward a terminal handoff.
+
+## When blocked
+
+If a task is ambiguous, contradicts its specification, or cannot proceed,
+stop and say so in your terminal — plainly, with what you need. Do not
+guess, do not silently skip work, and do not send a `note` handoff unless
+your role prompt or the user directed you to.

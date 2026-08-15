@@ -1,0 +1,40 @@
+# Article: Project
+
+This project is **swarm-forge-herdr itself** — the swarm runtime you are
+running on. You are building your own next phase. Precision matters
+doubly: broken runtime code breaks future swarms, including this one.
+
+## Language and layout
+
+- Language: Babashka (Clojure) scripts + bash wrappers
+- Runtime scripts: `swarmforge/scripts/` (the handoff protocol, router)
+- Launcher: `bin/swarm`
+- Stock prompts/contracts: `prompts/` (installed copies live under
+  `swarmforge/roles`, `swarmforge/contracts` — edit `prompts/` as source
+  of truth and sync the installed copy when a task touches both)
+- Tests: `test/smoke.sh` (end-to-end protocol suite)
+- Design authority for v2 work: `docs/squad-v2.md` — follow it exactly;
+  deviations are findings to report, not decisions to make.
+
+## Commands
+
+- Test suite: `./test/smoke.sh` (must end `SMOKE PASSED (N checks)`)
+- Syntax check a script: `bb <file>` with args, or load it —
+  every `.bb` you touch must at least parse
+- No coverage/mutation tooling for bb; the smoke suite and adversarial
+  review are the quality gates
+
+## Quality bars
+
+- Smoke suite green before any handoff; new behavior needs new smoke
+  checks in the same commit.
+- Follow existing code style: one shared lib, thin entries, agent-legible
+  error tokens, docstrings on non-obvious fns.
+- The running daemon/scripts must stay protocol-compatible: never change
+  existing output tokens, exit codes, or file formats without the task
+  explicitly saying so.
+
+## Notes
+
+- Do not edit `.swarmforge/` runtime state or restart daemons; the human
+  operator owns the running swarm.
