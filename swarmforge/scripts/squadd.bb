@@ -8,7 +8,9 @@
 ;; --residual-only and wake the squad-leader only when a residual target
 ;; appears that the previous poll did not have (the leader polls judgment,
 ;; not mechanics). The daemon is the sole owner of the project's main
-;; branch: nothing else merges.
+;; branch: nothing else merges, and it merges only while that branch
+;; ('main', or `main_branch <name>` in swarmforge/squad.conf) is checked
+;; out in the project root — anything else is skipped and retried.
 ;;
 ;; Every applied action is logged to .swarmforge/squad/events.log; daemon
 ;; operations (start/stop, failures, wake-ups) go to squadd.log. All paths
@@ -49,8 +51,10 @@
 (def log-file (fs/path daemon-dir "squadd.log"))
 (def stopping (atom false))
 (def known-residuals
-  "Residual targets seen on the previous poll; only targets beyond this
-  set trigger a leader wake-up."
+  "Residual [target action] pairs seen on the previous poll; only pairs
+  beyond this set trigger a leader wake-up. Keyed on the pair, not the
+  target alone, so a known target whose advised action changes (review ->
+  route-merger) still wakes the leader (reviewer finding, squadd)."
   (atom #{}))
 
 (def swarm-bin (or (not-empty (System/getenv "SWARM_BIN")) "swarm"))
@@ -134,12 +138,44 @@
           ;; Leave the request in place: the next poll retries the spawn.
           (log! "spawn-failed" target (failure-text result)))))))
 
+(defn- main-branch
+  "The only branch the daemon merges into — the daemon is the sole owner
+  of the project's main branch (squad-s3.md). 'main' unless a
+  'main_branch <name>' line in swarmforge/squad.conf says otherwise."
+  []
+  (let [conf (fs/path project-root "swarmforge" "squad.conf")]
+    (or (when (fs/exists? conf)
+          (some #(second (re-matches #"\s*main_branch\s+(\S+)\s*" %))
+                (str/split-lines (slurp (str conf)))))
+        "main")))
+
+(defn- checked-out-branch []
+  (let [{:keys [exit out]} (sh "git" "symbolic-ref" "--short" "-q" "HEAD")]
+    (when (zero? exit) (str/trim (str out)))))
+
 (defn merge! [{:keys [target]}]
   (let [result-file (fs/path squad-dir "assignments" target "result.handoff")
         commit (when (fs/exists? result-file)
-                 (handoff-lib/header-field result-file "commit"))]
-    (if-not commit
-      (mark-blocked! target "result.handoff missing or has no commit header")
+                 (handoff-lib/header-field result-file "commit"))
+        branch (checked-out-branch)]
+    (cond
+      ;; A wrong checkout is an operator-side anomaly, not a conflict:
+      ;; skip and retry next poll rather than mark blocked (reviewer
+      ;; finding, squadd: merging into whatever was checked out silently
+      ;; stranded the commit off main).
+      (not= branch (main-branch))
+      (log! "merge-skipped" target
+            (str "HEAD is " (or branch "detached") ", not " (main-branch)
+                 "; retrying next poll"))
+
+      ;; The commit header is stored data, not the validated swarm_handoff
+      ;; path — gate its shape before it becomes git argv.
+      (not (and commit (re-matches #"[0-9a-fA-F]{7,40}" commit)))
+      (mark-blocked! target (if commit
+                              (str "invalid commit header: " (summarize commit))
+                              "result.handoff missing or has no commit header"))
+
+      :else
       (let [{:keys [exit] :as result} (sh "git" "merge" "--no-edit" commit)]
         (if (zero? exit)
           (do (bb-script "squad_assign.bb" "merge" target)
@@ -194,12 +230,14 @@
         (log! "wake-skipped" "no squad-leader row in roles.tsv")))))
 
 (defn check-residuals!
-  "Wake the leader only on residual targets the previous poll did not
-  have; a target that disappears and returns wakes again on return."
+  "Wake the leader only on residual [target action] pairs the previous
+  poll did not have; a pair that disappears and returns wakes again on
+  return."
   []
-  (let [targets (set (keep :target (advisor-blocks "--residual-only")))
-        fresh (sort (remove @known-residuals targets))]
-    (reset! known-residuals targets)
+  (let [pairs (set (map (juxt :target :action) (advisor-blocks "--residual-only")))
+        fresh (sort (map (fn [[target action]] (str target ":" action))
+                         (remove @known-residuals pairs)))]
+    (reset! known-residuals pairs)
     (when (seq fresh)
       (log! "residual-new" (str/join " " fresh))
       (wake-leader!))))

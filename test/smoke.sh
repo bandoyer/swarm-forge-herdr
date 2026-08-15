@@ -762,16 +762,10 @@ grep -q '^WAKE agent prompt squad-leader ' wakes.log \
   || { cat wakes.log 2>/dev/null; fail "wake should reach the leader agent from roles.tsv"; }
 ok "wake command carries the leader agent name"
 
-# --- reviewer findings (squadd review) --------------------------------------
-# Failing tests for open defects; disabled so the suite stays green. Run
-# with SMOKE_FINDINGS=1 to watch them fail; the coder's fix enables them.
-if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
-
-step "FINDING: daemon merges into whatever branch is checked out, not main"
-# squadd merge! runs `git merge` in the project root with no branch check;
-# with a side branch checked out the assignment is marked :merged while
-# main never receives the commit — violating squad-s3.md's "sole owner of
-# the project's main branch" / "merge ... into the project's main branch".
+step "squadd: merge only happens on the main branch"
+# With a side branch checked out, the daemon must skip the merge (and
+# retry next poll) instead of marking :merged while main never receives
+# the commit (reviewer finding, squadd).
 git checkout -qb work main
 echo feature > feature.txt
 git add feature.txt
@@ -789,14 +783,24 @@ if "$SCRIPTS/squad_assign.sh" status wb1 | grep -q 'STATE: merged'; then
     || fail "assignment marked merged but its commit is not on main"
 fi
 ok "merged implies the commit landed on main"
+OUT="$("$SCRIPTS/squad_assign.sh" status wb1)"
+expect "off-main merge skipped, not blocked" "STATE: accepted" <<<"$OUT"
+grep -q 'merge-skipped wb1' .swarmforge/squad/daemon/squadd.log \
+  || fail "skipped merge should be logged"
+ok "skip logged for retry"
 git checkout -q main
+bb "$SCRIPTS/squadd.bb" "$FP" --once
+OUT="$("$SCRIPTS/squad_assign.sh" status wb1)"
+expect "merge retried once back on main" "STATE: merged" <<<"$OUT"
+git merge-base --is-ancestor "$WC" main || fail "retried merge should land on main"
+ok "retried merge landed on main"
 
-step "FINDING: residual action change on a known target never re-wakes the leader"
-# check-residuals! dedups wake-ups by TARGET only. In the long-running
-# daemon, a target that moves review -> (accept, conflict) -> route-merger
-# between polls stays in known-residuals, so the new residual action is
-# suppressed and the leader is never told to route a merger. --once runs
-# cannot see this: each is a fresh process with an empty known-residuals.
+step "squadd: residual action change on a known target re-wakes the leader"
+# The wake dedup is keyed on [target action] pairs: a target that moves
+# review -> (accept, conflict) -> route-merger between polls of the
+# long-running daemon must wake the leader again (reviewer finding,
+# squadd). --once runs cannot see this: each is a fresh process with an
+# empty known-residuals.
 git checkout -qb xwork main
 echo "worker version" > f.txt
 git -c user.email=smoke@test -c user.name=smoke commit -qam "x work"
@@ -823,8 +827,6 @@ wait "$SQDPID" 2>/dev/null || true
 [ "$(grep -c '^WAKE ' wakes.log)" -ge 2 ] \
   || fail "route-merger appeared on a known target but the leader was never re-woken"
 ok "new residual action on a known target re-wakes the leader"
-
-fi
 cd "$CODER"
 
 echo
