@@ -253,6 +253,10 @@ set -e
 expect "capacity token" "CAPACITY_EXHAUSTED" <<<"$OUT"
 OUT="$("$SCRIPTS/squad_worker.sh" list)"
 expect "list reflects lowered cap" "ACTIVE: 2/2" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" retire project-reviewer-a3)"
+expect "retire straight from allocated" "WORKER_STATE: project-reviewer-a3 allocated -> retired" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_worker.sh" allocate a4 implementer)"
+expect "retired worker frees a capacity slot" "WORKER_ALLOCATED: project-implementer-a4" <<<"$OUT"
 rm swarmforge/squad.conf
 
 step "squad worker: name sanitization and left-trim"
