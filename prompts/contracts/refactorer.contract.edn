@@ -1,0 +1,3 @@
+{:role "refactorer"
+ :artifact-roots ["src/" "tests/" "test/"]
+ :required-evidence [{:name "tests-green" :pattern "(?i)(\\d+ )?(tests? )?passed|dotnet test|bb test"}]}

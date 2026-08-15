@@ -122,8 +122,10 @@ cadence as v1.
 - Gherkin/APS acceptance pipeline integration (tracked separately)
 - Multi-project squads
 
-## Open decisions
+## Decisions
 
-1. Approvals surface: CLI + herdr notifications vs. building the web UI now.
-2. S1 evidence enforcement: hard-block the handoff vs. warn-only first.
-3. Transient capacity default (upstream: 10).
+1. S1 enforcement: **hard-block** — a violating handoff is rejected with a
+   repairable reason and never merges (decided 2026-08-15).
+2. Approvals: **CLI + herdr notifications**; web UI stays deferred
+   (decided 2026-08-15).
+3. Transient capacity default: 10 (upstream's default).

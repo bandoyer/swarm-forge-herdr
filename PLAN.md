@@ -87,12 +87,16 @@ proven live. Adversaries run surfaced and fixed the stale-worktree trap:
 WRONG_WORKTREE guard in all queue commands, worktree stated in bootstrap,
 stale-worktree warning in `swarm switch`.
 
-## Phase 5 — v2 (out of scope for v1)
+## Phase 5 — v2 (in progress; design: docs/squad-v2.md)
 
-- `squad` branch equivalent: squad-leader, dynamic worker spawning, 14 role
-  templates, contract *enforcement* (required-evidence validation), merger
-  role, web dashboard (~3–4× pack runtime surface)
-- gherkin-mutator adapter; more toolsets (TypeScript, Python)
+- [x] S1 contracts & evidence enforcement (2026-08-15): per-role
+  `*.contract.edn` (artifact roots + required evidence), hard-block
+  validation in `swarm_handoff`, contracts for all 8 pack roles,
+  installed by init/switch, smoke-tested (22 checks)
+- [ ] S2 transient workers + squad-leader
+- [ ] S3 advisor (`squad-next`) + daemon main-git ownership
+- [ ] S4 themes, approvals (CLI + herdr notifications), reporting
+- Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 
 ## Decisions log
 

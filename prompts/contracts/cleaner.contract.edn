@@ -1,0 +1,5 @@
+{:role "cleaner"
+ :artifact-roots ["src/" "tests/" "test/" "docs/"]
+ :required-evidence [{:name "tests-green" :pattern "(?i)(\\d+ )?(tests? )?passed|dotnet test|bb test"}
+                     {:name "complexity" :pattern "(?i)crap"}
+                     {:name "duplication" :pattern "(?i)jscpd|deintroverter|duplicat|clones?"}]}

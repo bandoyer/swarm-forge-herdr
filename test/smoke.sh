@@ -111,6 +111,36 @@ OUT="$(SWARMFORGE_ROLE=coder "$SCRIPTS/done_with_current.sh")"
 expect "task completed" "COMPLETED:" <<<"$OUT"
 expect "coder queue drained" "NO_TASK" <<<"$OUT"
 
+step "contract enforcement: violations hard-block, compliance passes"
+mkdir -p "$CODER/swarmforge/contracts"
+cat > "$CODER/swarmforge/contracts/coder.contract.edn" <<'EDN'
+{:role "coder"
+ :artifact-roots ["src/"]
+ :required-evidence [{:name "tests-green" :pattern "(?i)tests? passed"}]}
+EDN
+mkdir -p src && echo x > src/ok.txt && echo y > forbidden.txt
+git add src forbidden.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "bad commit, no evidence"
+BAD="$(git rev-parse --short=10 HEAD)"
+printf 'type: git_handoff\nto: cleaner\npriority: 50\ntask: contract-check\ncommit: %s\n' "$BAD" > draft.txt
+set +e
+OUT="$(SWARMFORGE_ROLE=coder "$SCRIPTS/swarm_handoff.sh" draft.txt 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "contract violation should exit 2, got $STATUS"
+expect "contract: out-of-root path rejected" "outside role coder's artifact roots" <<<"$OUT"
+expect "contract: missing evidence rejected" "required evidence 'tests-green'" <<<"$OUT"
+echo z >> src/ok.txt && git add src
+git -c user.email=smoke@test -c user.name=smoke commit -qm "good commit
+
+All 5 tests passed."
+GOOD="$(git rev-parse --short=10 HEAD)"
+printf 'type: git_handoff\nto: cleaner\npriority: 50\ntask: contract-check\ncommit: %s\n' "$GOOD" > draft.txt
+OUT="$(SWARMFORGE_ROLE=coder "$SCRIPTS/swarm_handoff.sh" draft.txt)"
+expect "contract: compliant commit queues" "HANDOFF QUEUED:" <<<"$OUT"
+rm -f draft.txt
+rm -rf "$CODER/swarmforge/contracts"
+
 step "done with nothing in process fails cleanly"
 set +e
 OUT="$(SWARMFORGE_ROLE=coder "$SCRIPTS/done_with_current.sh" 2>&1)"

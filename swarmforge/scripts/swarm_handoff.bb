@@ -204,7 +204,14 @@
       (handoff-lib/assert-role-worktree!)
       (let [{:keys [headers errors]} (parse-draft draft)
             validation (validate headers)
-            all-errors (into errors (:errors validation))]
+            contract-errors (if (and (= "git_handoff" (get headers "type"))
+                                     (:canonical-commit validation))
+                              (handoff-lib/contract-violations
+                               sender (:canonical-commit validation))
+                              [])
+            all-errors (-> errors
+                           (into (:errors validation))
+                           (into contract-errors))]
         (when (seq all-errors)
           (binding [*out* *err*]
             (println "HANDOFF INVALID:" (str draft))

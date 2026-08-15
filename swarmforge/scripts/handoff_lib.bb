@@ -9,6 +9,7 @@
 (ns handoff-lib
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [clojure.edn :as edn]
             [clojure.string :as str]))
 
 ;; ---------------------------------------------------------------------------
@@ -101,6 +102,45 @@
            (str "but this command ran in")
            (str "  " here)
            "cd to the registered worktree and retry."))))
+
+;; ---------------------------------------------------------------------------
+;; Role contracts (squad v2, S1) — optional per-role law: which paths a
+;; role may author and what evidence its commits must carry. Absent
+;; contract = no enforcement, so adoption is progressive.
+
+(defn role-contract [role-name]
+  (let [file (fs/path (project-root) "swarmforge" "contracts"
+                      (str role-name ".contract.edn"))]
+    (when (fs/exists? file)
+      (edn/read-string (slurp (str file))))))
+
+(defn- git-lines [& args]
+  (let [{:keys [exit out]} (apply process/sh {:continue true} args)]
+    (when (zero? exit)
+      (vec (remove str/blank? (str/split-lines out))))))
+
+(defn contract-violations
+  "Errors for a git_handoff commit under the sender's contract, or [] —
+  checks authored paths against :artifact-roots and the commit message
+  against :required-evidence patterns. Merge commits (>1 parent) are
+  integration, not authorship, and are skipped."
+  [role-name commit]
+  (if-let [{:keys [artifact-roots required-evidence]} (role-contract role-name)]
+    (let [parents (git-lines "git" "rev-list" "--parents" "-n" "1" commit)
+          merge? (> (count (str/split (or (first parents) "") #" ")) 2)
+          paths (when-not merge?
+                  (git-lines "git" "diff-tree" "--no-commit-id" "--name-only" "-r" commit))
+          message (str/join "\n" (or (git-lines "git" "log" "-1" "--format=%B" commit) []))
+          allowed? (fn [path] (some #(or (= path %) (str/starts-with? path %)) artifact-roots))
+          path-errors (for [path paths :when (not (allowed? path))]
+                        (format "Contract: '%s' is outside role %s's artifact roots (%s)."
+                                path role-name (str/join ", " artifact-roots)))
+          evidence-errors (for [{:keys [name pattern]} required-evidence
+                                :when (not (re-find (re-pattern pattern) message))]
+                            (format "Contract: required evidence '%s' not found in the commit message (expected to match: %s). Run the tool and record the real result in the commit message."
+                                    name pattern))]
+      (vec (concat path-errors evidence-errors)))
+    []))
 
 ;; ---------------------------------------------------------------------------
 ;; Timestamps

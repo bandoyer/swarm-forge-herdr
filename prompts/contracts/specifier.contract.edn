@@ -1,0 +1,3 @@
+{:role "specifier"
+ :artifact-roots ["specs/" "features/" "stories/" "docs/"]
+ :required-evidence [{:name "acceptance-criteria" :pattern "(?i)acceptance criteri"}]}

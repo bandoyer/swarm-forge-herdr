@@ -1,0 +1,3 @@
+{:role "coder"
+ :artifact-roots ["src/" "tests/" "test/" "features/" ".gitignore"]
+ :required-evidence [{:name "tests-green" :pattern "(?i)(\\d+ )?(tests? )?passed|dotnet test|bb test"}]}

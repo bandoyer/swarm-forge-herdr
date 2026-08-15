@@ -1,0 +1,6 @@
+{:role "hardener"
+ :artifact-roots ["src/" "tests/" "test/"]
+ :required-evidence [{:name "coverage-fresh" :pattern "(?i)coverage|lcov"}
+                     {:name "complexity" :pattern "(?i)crap"}
+                     {:name "mutation" :pattern "(?i)mutat|stryker"}
+                     {:name "duplication" :pattern "(?i)jscpd|deintroverter|duplicat|clones?"}]}

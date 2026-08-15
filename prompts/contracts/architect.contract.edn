@@ -1,0 +1,3 @@
+{:role "architect"
+ :artifact-roots ["src/" "tests/" "test/" "docs/"]
+ :required-evidence [{:name "suite-run" :pattern "(?i)(\\d+ )?(tests? )?passed|dotnet test|bb test|acceptance"}]}
