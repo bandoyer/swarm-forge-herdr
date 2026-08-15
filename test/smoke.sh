@@ -513,6 +513,68 @@ AFTER="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum
 ok "state identical before and after advisor runs"
 [ "$FIRST" = "$SECOND" ] || fail "advisor output should be deterministic"
 ok "back-to-back runs are identical"
+
+step "advisor: partial capacity splits spawn/wait in request order"
+# One free slot, two pending requests: the budget must hand out exactly the
+# remaining capacity, not evaluate each request against a >0 check.
+ADVISOR2="$WORK/advisor2"
+mkdir -p "$ADVISOR2/.swarmforge" "$ADVISOR2/swarmforge"
+cp "$PROJECT/.swarmforge/roles.tsv" "$ADVISOR2/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$ADVISOR2/swarmforge/scripts"
+cd "$ADVISOR2"
+echo "work" > pc.md
+printf 'max_transient_agents 1\n' > swarmforge/squad.conf
+"$SCRIPTS/squad_assign.sh" create pc1 implementer pc.md > /dev/null
+"$SCRIPTS/squad_assign.sh" create pc2 implementer pc.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create pc1 implementer > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create pc2 implementer > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh" --mechanical-only)"
+grep -A3 '^NEXT_ACTION: spawn$' <<<"$OUT" | grep -q 'TARGET: pc1' \
+  || { echo "$OUT"; fail "one free slot should spawn the first request"; }
+grep -A3 '^NEXT_ACTION: wait-capacity$' <<<"$OUT" | grep -q 'TARGET: pc2' \
+  || { echo "$OUT"; fail "overflow request should wait-capacity"; }
+[ "$(grep -c '^NEXT_ACTION: spawn$' <<<"$OUT")" -eq 1 ] \
+  || { echo "$OUT"; fail "exactly one spawn should be advised for one free slot"; }
+ok "one slot, two requests: first spawns, second waits"
+
+# --- reviewer findings (squad-advisor review) -------------------------------
+# Each block below is a failing test for an open defect; disabled so the
+# suite stays green. Run with SMOKE_FINDINGS=1 to watch them fail; the
+# coder's fix removes the gate.
+if [ "${SMOKE_FINDINGS:-0}" = 1 ]; then
+
+step "FINDING: spawn-request create accepts a replaced (retired) assignment"
+# squad_spawn_request.bb create checks only (= :created state), but
+# squad_assign replace! keeps the old record's state, so a replaced
+# :created assignment passes the gate and the request is born stale —
+# contradicting the script's own header claim that a stale request "can
+# only arise from lifecycle movement after the fact".
+"$SCRIPTS/squad_assign.sh" create fr1 implementer pc.md > /dev/null
+"$SCRIPTS/squad_assign.sh" replace fr1 fr2 implementer pc.md > /dev/null
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create fr1 implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] \
+  || { echo "$OUT"; fail "spawn-request for a replaced assignment should be refused (exit 2), got $STATUS"; }
+ok "replaced assignment cannot request a spawn"
+
+step "FINDING: unvalidated template forges events.log lines"
+# The template argument flows raw into log-event! detail; a newline in it
+# appends an attacker-chosen line to the durable audit log. Ids are
+# validated before path resolution — templates deserve the same gate (they
+# also become daemon spawn arguments in slice B).
+"$SCRIPTS/squad_assign.sh" create fr3 implementer pc.md > /dev/null
+set +e
+"$SCRIPTS/squad_spawn_request.sh" create fr3 \
+  "$(printf 'implementer\n2026-01-01T00:00:00Z fr3 accepted FORGED')" > /dev/null 2>&1
+set -e
+if grep -q 'FORGED' .swarmforge/squad/events.log; then
+  fail "hostile template must not forge an events.log line"
+fi
+ok "template cannot forge audit-log lines"
+
+fi
 cd "$CODER"
 
 echo
