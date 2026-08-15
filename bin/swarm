@@ -78,11 +78,18 @@
               (die (format "Invalid role '%s': role names may not contain underscores." role)))
             (when (or (str/includes? worktree "/") (#{"." ".."} worktree))
               (die (format "Invalid worktree '%s' for role '%s'." worktree role)))
-            (let [agent-name (str/lower-case role)]
-              ;; Role names are protocol identifiers (upstream allows e.g. "QA");
-              ;; herdr agent names must be lowercase — keep them separate.
+            ;; Role names are protocol identifiers (upstream allows e.g. "QA");
+            ;; herdr agent names must be lowercase AND are global across all
+            ;; workspaces, so they get a project prefix — otherwise two swarms
+            ;; sharing role names adopt each other's agents.
+            (let [prefix (-> (str (fs/file-name project-root))
+                             str/lower-case
+                             (str/replace #"[^a-z0-9_-]" "-")
+                             (as-> p (if (re-find #"^[a-z]" p) p (str "p" p))))
+                  agent-name (let [n (str prefix "-" (str/lower-case role))]
+                               (if (> (count n) 32) (subs n (- (count n) 32)) n))]
               (when-not (re-matches #"[a-z][a-z0-9_-]{0,31}" agent-name)
-                (die (format "Role '%s' cannot be mapped to a herdr agent name (lowercase letters, digits, - or _)." role)))
+                (die (format "Role '%s' cannot be mapped to a herdr agent name (got '%s')." role agent-name)))
               {:role role
                :agent-name agent-name
                :agent-kind agent-kind
@@ -490,6 +497,15 @@
     (doseq [[t message] (take-last n events)]
       (println t message))))
 
+(defn prompt! [role-arg text]
+  (when (or (str/blank? role-arg) (str/blank? text))
+    (die "Usage: swarm prompt <role> <text>"))
+  (let [row (or (some #(when (or (= role-arg (:role %)) (= role-arg (:agent-name %))) %)
+                      (parse-conf))
+                (die (str "Unknown role: " role-arg)))]
+    (herdr "agent" "prompt" (:agent-name row) text)
+    (println "Prompted" (:role row) "(" (:agent-name row) ")")))
+
 (defn status! []
   (println "project:" (str project-root))
   (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init <pack>`)"))
@@ -510,7 +526,8 @@
     "down" (down!)
     "status" (status!)
     "logs" (logs! (second args))
+    "prompt" (prompt! (second args) (str/join " " (drop 2 args)))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | down | status | logs [n]]")))
+         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | down | status | logs [n]]")))
 
 (-main *command-line-args*)
