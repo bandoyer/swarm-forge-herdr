@@ -29,7 +29,7 @@
 
 (defn die [& lines]
   (binding [*out* *err*]
-    (doseq [line lines] (println line)))
+    (doseq [line lines :when line] (println line)))
   (System/exit 1))
 
 (defn sh-ok [& args]
@@ -121,19 +121,30 @@
 
 ;; --- herdr ----------------------------------------------------------------
 
-(defn herdr
-  "Run a herdr subcommand; return parsed JSON when the output is JSON,
-  otherwise the raw output string."
+(defn herdr-try
+  "Run a herdr subcommand without dying. Returns {:ok? :data :error-code
+  :error-message}; :data is parsed JSON when the output is JSON."
   [& args]
-  (let [{:keys [exit out err]} (apply process/sh {:continue true} "herdr" args)]
-    (when-not (zero? exit)
+  (let [{:keys [exit out err]} (apply process/sh {:continue true} "herdr" args)
+        trimmed (str/trim (str out))
+        parsed (when (or (str/starts-with? trimmed "{") (str/starts-with? trimmed "["))
+                 (try (json/parse-string trimmed true) (catch Exception _ nil)))]
+    {:ok? (zero? exit)
+     :data (or parsed trimmed)
+     :error-code (get-in parsed [:error :code])
+     :error-message (or (get-in parsed [:error :message])
+                        (str/trim (str out "\n" err)))}))
+
+(defn herdr
+  "Run a herdr subcommand or die with its actual error."
+  [& args]
+  (let [{:keys [ok? data error-message]} (apply herdr-try args)]
+    (when-not ok?
       (die (str "herdr " (str/join " " args) " failed:")
-           (str/trim (str out "\n" err))
-           "" "Is the herdr server running? Start it with `herdr` (or `herdr server`)."))
-    (let [trimmed (str/trim out)]
-      (if (or (str/starts-with? trimmed "{") (str/starts-with? trimmed "["))
-        (json/parse-string trimmed true)
-        trimmed))))
+           error-message
+           (when (re-find #"(?i)connect|refused|socket|not running|no such file" error-message)
+             "Is the herdr server running? Start it with `herdr` (or `herdr server`).")))
+    data))
 
 (defn find-id
   "Defensively extract an id from herdr JSON: prefer keys containing `hint`
@@ -167,26 +178,63 @@
          "When your current task is fully complete, run "
          "swarmforge/scripts/done_with_current.sh.")))
 
-(defn launch-agents! [rows]
-  (let [workspace (herdr "workspace" "create"
-                         "--cwd" (str project-root)
-                         "--label" (str "swarm:" (fs/file-name project-root))
-                         "--no-focus")
-        workspace-id (find-id workspace "workspace")]
-    (spit (str (fs/path state-dir "herdr-workspace")) (str workspace-id "\n"))
+(defn existing-workspace
+  "The workspace recorded by a previous `swarm up`, if herdr still has it."
+  []
+  (let [ws-file (fs/path state-dir "herdr-workspace")]
+    (when (fs/exists? ws-file)
+      (let [id (str/trim (slurp (str ws-file)))]
+        (when (:ok? (herdr-try "workspace" "get" id))
+          id)))))
+
+(defn existing-agents []
+  (let [{:keys [ok? data]} (herdr-try "agent" "list")]
+    (if ok?
+      (set (keep #(or (:name %) (:label %))
+                 (get-in data [:result :agents])))
+      #{})))
+
+(defn launch-agents!
+  "Start each role's agent; reuses a previous workspace and skips roles
+  already running. Returns roles needing human attention (blocked during
+  startup — usually a first-run dialog in their pane)."
+  [rows]
+  (let [workspace-id (or (existing-workspace)
+                         (let [ws (herdr "workspace" "create"
+                                         "--cwd" (str project-root)
+                                         "--label" (str "swarm:" (fs/file-name project-root))
+                                         "--no-focus")
+                               id (find-id ws "workspace")]
+                           (spit (str (fs/path state-dir "herdr-workspace")) (str id "\n"))
+                           id))
+        running (existing-agents)
+        needs-attention (atom [])]
     (doseq [{:keys [role agent-kind worktree-path extra-args]} rows]
-      (println "Starting" role (str "(" agent-kind ")") "in" worktree-path)
-      (let [tab (herdr "tab" "create"
-                       "--workspace" workspace-id
-                       "--cwd" worktree-path
-                       "--label" role
-                       "--env" (str "SWARMFORGE_ROLE=" role)
-                       "--no-focus")
-            pane-id (find-id tab "pane")]
-        (apply herdr "agent" "start" role "--kind" agent-kind "--pane" pane-id
-               (when (seq extra-args) (cons "--" extra-args)))
-        (herdr "agent" "prompt" role (bootstrap-prompt role))))
-    workspace-id))
+      (if (running role)
+        (println role "already running.")
+        (let [_ (println "Starting" role (str "(" agent-kind ")") "in" worktree-path)
+              tab (herdr "tab" "create"
+                         "--workspace" workspace-id
+                         "--cwd" worktree-path
+                         "--label" role
+                         "--env" (str "SWARMFORGE_ROLE=" role)
+                         "--no-focus")
+              pane-id (find-id tab "pane")
+              start (apply herdr-try "agent" "start" role "--kind" agent-kind "--pane" pane-id
+                           (when (seq extra-args) (cons "--" extra-args)))]
+          (cond
+            (:ok? start)
+            (let [prompted (herdr-try "agent" "prompt" role (bootstrap-prompt role))]
+              (when-not (:ok? prompted)
+                (swap! needs-attention conj role)))
+
+            (= "agent_not_ready" (:error-code start))
+            (do (println "  " role "started but is BLOCKED (a startup dialog in its pane).")
+                (swap! needs-attention conj role))
+
+            :else
+            (die (str "herdr agent start " role " failed:") (:error-message start))))))
+    @needs-attention))
 
 ;; --- daemon lifecycle -----------------------------------------------------
 
@@ -295,11 +343,27 @@
     (ensure-queue-dirs! rows)
     (sync-scripts! rows)
     (write-roles-tsv! rows)
-    (launch-agents! rows)
-    (start-daemon!)
-    (println)
-    (println "Swarm is up:" (str/join ", " (map :role rows)))
-    (println "Watch it in herdr; stop it with `swarm down`.")))
+    (let [needs-attention (launch-agents! rows)]
+      (start-daemon!)
+      (println)
+      (println "Swarm is up:" (str/join ", " (map :role rows)))
+      (when (seq needs-attention)
+        (println)
+        (println "NEEDS ATTENTION:" (str/join ", " needs-attention))
+        (println "Open each blocked agent's pane, answer its startup dialog")
+        (println "(e.g. Claude Code's folder-trust prompt), then run:")
+        (doseq [role needs-attention]
+          (println "  swarm bootstrap" role)))
+      (println "Watch it in herdr; stop it with `swarm down`."))))
+
+(defn bootstrap! [role-arg]
+  (let [rows (parse-conf)
+        targets (if role-arg (filter #(= role-arg (:role %)) rows) rows)]
+    (when (empty? targets)
+      (die (str "Unknown role: " role-arg)))
+    (doseq [{:keys [role]} targets]
+      (herdr "agent" "prompt" role (bootstrap-prompt role))
+      (println "Sent role bootstrap to" role))))
 
 (defn down! []
   (stop-daemon!)
@@ -326,9 +390,10 @@
     "toolset" (toolset! (second args))
     "up" (up!)
     nil (up!)
+    "bootstrap" (bootstrap! (second args))
     "down" (down!)
     "status" (status!)
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | toolset <name> | up | down | status]")))
+         "Usage: swarm [init <pack> | toolset <name> | up | bootstrap [role] | down | status]")))
 
 (-main *command-line-args*)
