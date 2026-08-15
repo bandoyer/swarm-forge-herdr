@@ -203,6 +203,20 @@ ok "a2 logged created/result/rejected/replaced"
 ok "all events.log lines timestamped"
 grep -q ' a2 rejected reason=missing unit tests' "$LOG" || { cat "$LOG"; fail "reject reason not logged"; }
 ok "reject reason logged"
+
+step "squad: result retries cleanly after a crash-interrupted result"
+# Simulate a prior `result` that copied the handoff but crashed before the
+# status write: the file exists, the state still allows result. The retry
+# must succeed — durable file state exists precisely so operations can be
+# retried after a crash, and a raw stack trace is not an agent-legible error.
+"$SCRIPTS/squad_assign.sh" create a4 implementer instructions.md > /dev/null
+cp worker.handoff .swarmforge/squad/assignments/a4/result.handoff
+set +e
+OUT="$("$SCRIPTS/squad_assign.sh" result a4 worker.handoff 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || { echo "$OUT"; fail "result retry after crashed copy should succeed, got $STATUS"; }
+expect "result retry transition" "ASSIGNMENT_STATE: a4 created -> result" <<<"$OUT"
 rm -f instructions.md worker.handoff
 
 echo

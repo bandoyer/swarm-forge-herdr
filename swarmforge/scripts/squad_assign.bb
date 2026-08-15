@@ -118,7 +118,9 @@
     (handoff-lib/die 1 (str "Handoff file not found: " handoff-file)))
   (let [stored (fs/path (assignment-dir id) "result.handoff")]
     (transition! id :result
-                 {:effect! #(fs/copy handoff-file stored)
+                 ;; replace-existing: a crashed prior attempt may have copied
+                 ;; the file before the status write; the retry must succeed.
+                 {:effect! #(fs/copy handoff-file stored {:replace-existing true})
                   :extra {:result-file (str stored)}
                   :detail (str "handoff=" (fs/file-name (fs/path handoff-file)))})))
 
