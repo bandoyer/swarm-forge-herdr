@@ -78,7 +78,14 @@ pass with real, independently reverified evidence (10/10 tests, 100%
 coverage, crap4net 7/7 within bar, jscpd 0 clones) → terminal return
 handoffs → coder merge → all idle. Launcher fixes found and shipped:
 blocked-at-startup agents non-fatal, rerunnable `up`, `swarm bootstrap`.
-Six-pack with the full evidence regime: future work.
+Six-pack validated same day: full chain + terminal broadcast, hardener
+reached 100% mutation score with justified survivors, QA mapped all 11
+acceptance criteria; every number independently reverified. Four-pack
+(refactorer did real DRY work) and adversaries (reviewer hand-applied
+mutants, added interaction tests) validated 2026-08-15 — all four packs
+proven live. Adversaries run surfaced and fixed the stale-worktree trap:
+WRONG_WORKTREE guard in all queue commands, worktree stated in bootstrap,
+stale-worktree warning in `swarm switch`.
 
 ## Phase 5 — v2 (out of scope for v1)
 
