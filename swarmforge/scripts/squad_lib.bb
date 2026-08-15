@@ -78,6 +78,19 @@
   []
   (edn-records (spawn-requests-dir)))
 
+;; --- approval records (S4) ------------------------------------------------
+
+(defn approvals-dir [] (fs/path (squad-dir) "approvals"))
+
+(defn all-approvals
+  "Every approval record, sorted by approval id."
+  []
+  (edn-records (approvals-dir)))
+
+;; --- theme records (S4) ---------------------------------------------------
+
+(defn themes-dir [] (fs/path (squad-dir) "themes"))
+
 ;; --- worker records -------------------------------------------------------
 
 (defn workers-dir [] (fs/path (squad-dir) "workers"))
@@ -116,6 +129,20 @@
   "Transient-worker capacity; 10 when unconfigured."
   []
   (conf-int "max_transient_agents" 10))
+
+(defn require-approval?
+  "True when squad.conf carries a 'require_approval <gate>' line — the S4
+  human gate: the daemon may not apply the gated action until an :approved
+  approval record exists for its target. No file or no line = no gate =
+  pre-S4 behavior (docs/squad-s4.md)."
+  [gate]
+  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")
+        line-re (re-pattern (str "\\s*require_approval\\s+"
+                                 (java.util.regex.Pattern/quote (str gate))
+                                 "\\s*"))]
+    (boolean (and (fs/exists? file)
+                  (some #(re-matches line-re %)
+                        (str/split-lines (slurp (str file))))))))
 
 (defn max-merger-depth
   "How many merger attempts a merge-blocked line of work may consume before

@@ -10,10 +10,11 @@
 ;;   TARGET: <assignment-id or worker-name>
 ;;   REASON: <one line>
 ;;
-;; separated by blank lines, in the order of squad-s3.md's 10-row action
-;; table. The daemon (slice B) applies the mechanical actions; the leader
-;; acts on the residual ones. Exit 0 always — an empty report is a valid
-;; report — and nothing on disk is ever created, written, or deleted.
+;; separated by blank lines, in the order of the action table: squad-s3.md's
+;; rows 1-10 plus squad-s4.md's approval rows 11-13 and its amendment of
+;; row 5 (the merge gate). The daemon applies the mechanical actions; the
+;; leader acts on the residual ones. Exit 0 always — an empty report is a
+;; valid report — and nothing on disk is ever created, written, or deleted.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
@@ -52,15 +53,25 @@
 
 (defn advice
   "All advisor blocks for one file-state snapshot: rows 1-10 of the
-  squad-s3.md action table, emitted in table order and sorted by record id
-  within a row. Replaced assignments (:replaced-by set) are retired
-  records — squad_assign's replace! reissues their work under the new
-  id — so they trigger no spawn or judgment rows; their pending
-  spawn-requests surface as stale (row 3) and their still-active workers
-  are still offered for retirement (rows 6-7)."
-  [{:keys [requests assignments workers cap max-depth]}]
+  squad-s3.md action table plus the squad-s4.md approval rows 11-13,
+  emitted in table order and sorted by record id within a row. Replaced
+  assignments (:replaced-by set) are retired records — squad_assign's
+  replace! reissues their work under the new id — so they trigger no spawn
+  or judgment rows; their pending spawn-requests surface as stale (row 3)
+  and their still-active workers are still offered for retirement (rows
+  6-7). With no require_approval line and no approval records the report
+  is byte-identical to S3: row 5 is only amended when merge-gate? is set,
+  and rows 11-13 fire only off the gate or off approval records."
+  [{:keys [requests assignments workers approvals cap max-depth merge-gate?]}]
   (let [by-id (into {} (map (juxt :id identity)) assignments)
         live (remove :replaced-by assignments)
+        ;; S4 approval gate: records are matched to an assignment by
+        ;; :target; only gate-"merge" records govern the merge gate.
+        approvals-for (fn [id] (filter #(and (= "merge" (:gate %))
+                                             (= id (:target %)))
+                                       approvals))
+        approved-for (fn [id] (first (filter #(= :approved (:state %))
+                                             (approvals-for id))))
         spawnable? (fn [{:keys [assignment]}]
                      (let [a (get by-id assignment)]
                        (and a (= :created (:state a)) (not (:replaced-by a)))))
@@ -91,10 +102,16 @@
      (for [a live :when (= :result (:state a))]
        (block "review" "residual" (:id a)
               "result recorded; leader must accept or reject"))
-     ;; row 5
-     (for [a live :when (= :accepted (:state a))]
+     ;; row 5 (amended by S4: when the merge gate is set, only an :approved
+     ;; approval record releases the merge)
+     (for [a live :when (= :accepted (:state a))
+           :let [approval (when merge-gate? (approved-for (:id a)))]
+           :when (or (not merge-gate?) approval)]
        (block "merge" "mechanical" (:id a)
-              "accepted; daemon merges the result commit into main"))
+              (if approval
+                (str "accepted and approval " (:id approval)
+                     " approved; daemon merges the result commit into main")
+                "accepted; daemon merges the result commit into main")))
      ;; row 6
      (for [a assignments :when (= :merged (:state a))
            worker (active-for (:id a))]
@@ -120,7 +137,29 @@
      ;; row 10
      (for [a live :when (and (= :created (:state a)) (not (requested? (:id a))))]
        (block "needs-spawn-request" "residual" (:id a)
-              "created but no spawn-request; leader must request a spawn")))))
+              "created but no spawn-request; leader must request a spawn"))
+     ;; row 11
+     (when merge-gate?
+       (for [a live :when (and (= :accepted (:state a))
+                               (empty? (approvals-for (:id a))))]
+         (block "request-approval" "residual" (:id a)
+                "accepted but the merge gate is set and no approval record exists; leader requests approval")))
+     ;; row 12 — informational: the user decides; nobody is waked for it,
+     ;; so the target is the approval id the user's CLI acts on.
+     (for [approval approvals :when (= :pending (:state approval))]
+       (block "await-user-approval" "residual" (:id approval)
+              (str (:gate approval) " approval for " (:target approval)
+                   " awaits the user's decision")))
+     ;; row 13
+     (for [approval approvals
+           :let [a (get by-id (:target approval))]
+           :when (and (= :rejected (:state approval))
+                      (some? a)
+                      (= :accepted (:state a))
+                      (not (:replaced-by a)))]
+       (block "handle-approval-rejection" "residual" (:target approval)
+              (str "approval " (:id approval)
+                   " rejected; leader rejects or reworks the assignment"))))))
 
 ;; --- entry ----------------------------------------------------------------
 
@@ -128,8 +167,10 @@
   {:requests (squad-lib/all-spawn-requests)
    :assignments (squad-lib/all-assignments)
    :workers (squad-lib/all-workers)
+   :approvals (squad-lib/all-approvals)
    :cap (squad-lib/max-transient-agents)
-   :max-depth (squad-lib/max-merger-depth)})
+   :max-depth (squad-lib/max-merger-depth)
+   :merge-gate? (squad-lib/require-approval? "merge")})
 
 (defn print-report! [blocks]
   (when (seq blocks)

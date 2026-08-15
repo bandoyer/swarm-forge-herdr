@@ -311,6 +311,136 @@ ok "one line per worker state change"
 [ -z "$(grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ' "$LOG")" ] || { cat "$LOG"; fail "events.log lines must be timestamped"; }
 ok "worker events.log lines timestamped"
 
+step "approval: request/status/approve/reject lifecycle"
+OUT="$("$SCRIPTS/squad_approval.sh" request ap1 merge a1 "Merge a1" ready for main)"
+expect "approval requested" "APPROVAL_REQUESTED: ap1" <<<"$OUT"
+AP=.swarmforge/squad/approvals/ap1.edn
+[ -f "$AP" ] || fail "approval record not written"
+grep -q ':state :pending' "$AP" || fail "approval should start pending"
+ok "approval record starts pending"
+OUT="$("$SCRIPTS/squad_approval.sh" status ap1)"
+expect "status reports pending" "STATE: pending" <<<"$OUT"
+expect "status carries gate" "GATE: merge" <<<"$OUT"
+expect "status carries target" "TARGET: a1" <<<"$OUT"
+expect "status carries title" "TITLE: Merge a1" <<<"$OUT"
+expect "status carries reason" "REASON: ready for main" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_approval.sh" approve ap1 looks good)"
+expect "approve transition" "APPROVAL_STATE: ap1 pending -> approved" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_approval.sh" status ap1)"
+expect "status reports approved" "STATE: approved" <<<"$OUT"
+expect "status carries decision detail" "DETAIL: looks good" <<<"$OUT"
+grep -q ':decided-at' "$AP" || fail "approve should stamp :decided-at"
+ok "approve stamps :decided-at"
+"$SCRIPTS/squad_approval.sh" request ap2 merge a3 "Merge a3" ready > /dev/null
+OUT="$("$SCRIPTS/squad_approval.sh" reject ap2 not safe yet)"
+expect "reject transition" "APPROVAL_STATE: ap2 pending -> rejected" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_approval.sh" status ap2)"
+expect "status reports rejected" "STATE: rejected" <<<"$OUT"
+expect "status carries reject reason" "DETAIL: not safe yet" <<<"$OUT"
+
+step "approval: decided approvals refuse further transitions"
+set +e
+OUT="$("$SCRIPTS/squad_approval.sh" approve ap2 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "approving a rejected approval should exit 2, got $STATUS"
+expect "approval illegal transition" "INVALID_TRANSITION: approval 'ap2' cannot go rejected -> approved" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_approval.sh" reject ap1 changed my mind 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "rejecting an approved approval should exit 2, got $STATUS"
+expect "approved cannot be rejected" "INVALID_TRANSITION" <<<"$OUT"
+
+step "approval: duplicate, hostile id, unknown id"
+set +e
+OUT="$("$SCRIPTS/squad_approval.sh" request ap1 merge a1 "Again" again 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "duplicate approval should exit 2, got $STATUS"
+expect "duplicate approval token" "APPROVAL_EXISTS: ap1" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_approval.sh" request '../evil' merge a1 "Evil" evil 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "hostile approval id should exit 2, got $STATUS"
+expect "hostile approval id rejected before path resolution" "INVALID_APPROVAL_ID" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_approval.sh" status ghost 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "unknown approval should exit 1, got $STATUS"
+expect "unknown approval token" "NO_SUCH_APPROVAL: ghost" <<<"$OUT"
+
+step "approval: list puts pending approvals first"
+"$SCRIPTS/squad_approval.sh" request ap0 merge a4 "Merge a4" pending one > /dev/null
+OUT="$("$SCRIPTS/squad_approval.sh" list)"
+expect "list shows pending approval" "ap0 pending merge a4 Merge a4" <<<"$OUT"
+expect "list shows approved approval" "ap1 approved merge a1 Merge a1" <<<"$OUT"
+expect "list shows rejected approval" "ap2 rejected merge a3 Merge a3" <<<"$OUT"
+[ "$(head -n1 <<<"$OUT")" = "ap0 pending merge a4 Merge a4" ] \
+  || { echo "$OUT"; fail "pending approval should list first"; }
+ok "pending approvals list first"
+
+step "approval: events.log records approval changes"
+grep -q ' ap1 requested gate=merge target=a1' "$LOG" || { cat "$LOG"; fail "request not logged"; }
+grep -q ' ap1 approved detail=looks good' "$LOG" || { cat "$LOG"; fail "approve not logged"; }
+grep -q ' ap2 rejected reason=not safe yet' "$LOG" || { cat "$LOG"; fail "reject not logged"; }
+ok "approval request/approve/reject logged"
+
+step "theme: create/attach/status"
+echo "Cleanup theme." > theme.md
+OUT="$("$SCRIPTS/squad_theme.sh" create th1 theme.md)"
+expect "theme created" "THEME_CREATED: th1" <<<"$OUT"
+[ -f .swarmforge/squad/themes/th1/theme.md ] || fail "theme.md not copied"
+[ -f .swarmforge/squad/themes/th1/status.edn ] || fail "theme status.edn not written"
+ok "theme records written"
+OUT="$("$SCRIPTS/squad_theme.sh" attach th1 a1)"
+expect "assignment attached" "THEME_ATTACHED: th1 a1" <<<"$OUT"
+"$SCRIPTS/squad_theme.sh" attach th1 a3 > /dev/null
+OUT="$("$SCRIPTS/squad_theme.sh" status th1)"
+expect "theme status names the theme" "THEME: th1" <<<"$OUT"
+expect "attached a1 shows its current state" "a1 accepted" <<<"$OUT"
+expect "attached a3 shows its current state" "a3 spawned" <<<"$OUT"
+
+step "theme: error paths are agent-legible"
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" create th1 theme.md 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "duplicate theme should exit 2, got $STATUS"
+expect "duplicate theme token" "THEME_EXISTS: th1" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" create '../evil' theme.md 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "hostile theme id should exit 2, got $STATUS"
+expect "hostile theme id rejected before path resolution" "INVALID_THEME_ID" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" attach ghost a1 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "attach to a missing theme should exit 2, got $STATUS"
+expect "missing theme token" "NO_SUCH_THEME: ghost" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" attach th1 ghost 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "attach of a missing assignment should exit 2, got $STATUS"
+expect "missing assignment token" "NO_SUCH_ASSIGNMENT: ghost" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_theme.sh" attach th1 a1 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "re-attach should exit 2, got $STATUS"
+expect "re-attach token" "ALREADY_ATTACHED: th1 a1" <<<"$OUT"
+
+step "theme: events.log records theme changes"
+grep -q ' th1 theme-created' "$LOG" || { cat "$LOG"; fail "theme create not logged"; }
+grep -q ' th1 theme-attached assignment=a1' "$LOG" || { cat "$LOG"; fail "attach not logged"; }
+ok "theme create/attach logged"
+rm -f theme.md
+
 step "squad: spawn driver file-state path (--no-agent)"
 cd "$CODER"
 SWARM="$TOOL_ROOT/bin/swarm"
@@ -602,6 +732,68 @@ if grep -q '^2026-01-01T00:00:00Z fr3 accepted FORGED2' .swarmforge/squad/events
   fail "newline in reject reason forged an events.log line"
 fi
 ok "free-text detail cannot forge audit-log lines"
+cd "$CODER"
+
+step "advisor: merge gate unset keeps row 5 byte-identical (S4 row 5*)"
+S4ADV="$WORK/advisor-s4"
+mkdir -p "$S4ADV/.swarmforge" "$S4ADV/swarmforge"
+cp "$PROJECT/.swarmforge/roles.tsv" "$S4ADV/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$S4ADV/swarmforge/scripts"
+cd "$S4ADV"
+synth g1 '{:id "g1" :template "implementer" :state :accepted}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "gate unset: accepted merges" "NEXT_ACTION: merge" <<<"$OUT"
+expect "gate unset: reason unchanged" "REASON: accepted; daemon merges the result commit into main" <<<"$OUT"
+if grep -q 'request-approval' <<<"$OUT"; then fail "no gate should mean no approval rows"; fi
+ok "gate unset advises merge exactly as before"
+
+step "advisor: gate set without a record advises request-approval, no merge (row 11)"
+printf 'require_approval merge\n' > swarmforge/squad.conf
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 11 fires" "NEXT_ACTION: request-approval" <<<"$OUT"
+expect "row 11 targets the assignment" "TARGET: g1" <<<"$OUT"
+expect "row 11 is residual" "CLASS: residual" <<<"$OUT"
+if grep -q '^NEXT_ACTION: merge$' <<<"$OUT"; then fail "unapproved accepted assignment must not merge"; fi
+ok "merge withheld until an approval record exists"
+
+step "advisor: pending approval advises await-user-approval (row 12)"
+"$SCRIPTS/squad_approval.sh" request apg1 merge g1 "Merge g1" ready > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 12 fires" "NEXT_ACTION: await-user-approval" <<<"$OUT"
+expect "row 12 targets the approval" "TARGET: apg1" <<<"$OUT"
+expect "row 12 is residual" "CLASS: residual" <<<"$OUT"
+if grep -q '^NEXT_ACTION: merge$' <<<"$OUT"; then fail "pending approval must not merge"; fi
+if grep -q 'request-approval' <<<"$OUT"; then fail "existing approval record must silence row 11"; fi
+ok "pending approval holds the merge and silences row 11"
+
+step "advisor: approved record releases the merge (row 5*)"
+"$SCRIPTS/squad_approval.sh" approve apg1 ship it > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "approved: merge advised" "NEXT_ACTION: merge" <<<"$OUT"
+expect "approved: merge targets g1" "TARGET: g1" <<<"$OUT"
+if grep -q 'await-user-approval\|request-approval' <<<"$OUT"; then
+  fail "decided approval should end rows 11-12"
+fi
+ok "approved gate releases the merge"
+
+step "advisor: rejected approval advises handle-approval-rejection (row 13)"
+synth g2 '{:id "g2" :template "implementer" :state :accepted}'
+"$SCRIPTS/squad_approval.sh" request apg2 merge g2 "Merge g2" ready > /dev/null
+"$SCRIPTS/squad_approval.sh" reject apg2 not safe > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 13 fires" "NEXT_ACTION: handle-approval-rejection" <<<"$OUT"
+grep -A3 '^NEXT_ACTION: handle-approval-rejection$' <<<"$OUT" | grep -q 'TARGET: g2' \
+  || { echo "$OUT"; fail "row 13 should target the rejected approval's assignment"; }
+ok "rejected approval routes the assignment back to the leader"
+if grep -A3 '^NEXT_ACTION: merge$' <<<"$OUT" | grep -q 'TARGET: g2'; then
+  fail "rejected approval must not merge g2"
+fi
+ok "rejected approval withholds g2's merge"
+SEQ="$(grep '^NEXT_ACTION: ' <<<"$OUT" | sed 's/^NEXT_ACTION: //' | tr '\n' ' ')"
+[ "$SEQ" = "merge handle-approval-rejection " ] \
+  || { echo "$OUT"; fail "S4 rows should follow table order; got: $SEQ"; }
+ok "S4 rows fire in table order"
+rm swarmforge/squad.conf
 cd "$CODER"
 
 step "squadd: simulator project (leader row, scripted workers, no agents)"
