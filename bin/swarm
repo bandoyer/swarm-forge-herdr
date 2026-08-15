@@ -1,0 +1,280 @@
+#!/usr/bin/env bb
+;; swarm — launch a SwarmForge-style role swarm on the herdr runtime.
+;;
+;; Usage (run from your project's root, inside a running `herdr` session):
+;;   swarm init <pack>   copy a pack preset to swarmforge/swarmforge.conf
+;;   swarm up            start worktrees, agents, and the handoff router
+;;   swarm down          stop the router and close the swarm workspace
+;;   swarm status        show swarm runtime state
+;;
+;; swarmforge.conf format (upstream-compatible):
+;;   window <role> <agent-kind> <worktree> [task|batch] [extra-cli-args...]
+;; A worktree of `master` or `none` means the role works in the project root.
+
+(ns swarm
+  (:require [babashka.fs :as fs]
+            [babashka.process :as process]
+            [cheshire.core :as json]
+            [clojure.string :as str]))
+
+(def tool-root (-> *file* fs/real-path fs/parent fs/parent))
+(def scripts-src (fs/path tool-root "swarmforge" "scripts"))
+(def project-root (fs/cwd))
+(def state-dir (fs/path project-root ".swarmforge"))
+(def conf-file (fs/path project-root "swarmforge" "swarmforge.conf"))
+(def worktrees-dir (fs/path project-root ".worktrees"))
+(def receive-modes #{"task" "batch"})
+
+(defn die [& lines]
+  (binding [*out* *err*]
+    (doseq [line lines] (println line)))
+  (System/exit 1))
+
+(defn sh-ok [& args]
+  (let [{:keys [exit err out]} (apply process/sh {:continue true} args)]
+    (when-not (zero? exit)
+      (die (str "Command failed: " (str/join " " args))
+           (str/trim (str out "\n" err))))
+    out))
+
+;; --- configuration --------------------------------------------------------
+
+(defn parse-conf []
+  (when-not (fs/exists? conf-file)
+    (die (str "No " conf-file)
+         "Run `swarm init <pack>` first (packs: two, four, six, adversaries)."))
+  (let [rows
+        (for [[line-no line] (map-indexed vector (str/split-lines (slurp (str conf-file))))
+              :let [trimmed (str/trim line)]
+              :when (and (not (str/blank? trimmed))
+                         (not (str/starts-with? trimmed "#")))]
+          (let [fields (str/split trimmed #"\s+")
+                [keyword role agent-kind worktree & trailing] fields
+                [mode extra] (if (receive-modes (first trailing))
+                               [(first trailing) (rest trailing)]
+                               ["task" trailing])]
+            (when-not (= "window" keyword)
+              (die (format "swarmforge.conf line %d: expected `window ...`, got `%s`"
+                           (inc line-no) trimmed)))
+            (when (or (nil? worktree) (str/blank? role))
+              (die (format "swarmforge.conf line %d: window needs <role> <agent> <worktree>"
+                           (inc line-no))))
+            (when (str/includes? role "_")
+              (die (format "Invalid role '%s': role names may not contain underscores." role)))
+            (when (or (str/includes? worktree "/") (#{"." ".."} worktree))
+              (die (format "Invalid worktree '%s' for role '%s'." worktree role)))
+            {:role role
+             :agent-kind agent-kind
+             :worktree-name worktree
+             :worktree-path (if (#{"master" "none"} worktree)
+                              (str project-root)
+                              (str (fs/path worktrees-dir worktree)))
+             :receive-mode mode
+             :extra-args (vec extra)}))]
+    (doseq [[value rows'] [[:role rows] [:worktree-name (remove #(#{"master" "none"} (:worktree-name %)) rows)]]
+            [duplicate n] (frequencies (map value rows'))
+            :when (> n 1)]
+      (die (format "Duplicate %s '%s' in swarmforge.conf" (name value) duplicate)))
+    (vec rows)))
+
+;; --- project preparation --------------------------------------------------
+
+(defn ensure-gitignore! []
+  (let [gitignore (fs/path project-root ".gitignore")
+        existing (if (fs/exists? gitignore) (slurp (str gitignore)) "")]
+    (doseq [entry [".swarmforge/" ".worktrees/"]]
+      (when-not (some #(= entry (str/trim %)) (str/split-lines existing))
+        (spit (str gitignore) (str entry "\n") :append true)))))
+
+(defn ensure-worktrees! [rows]
+  (doseq [{:keys [worktree-name worktree-path]} rows
+          :when (not (#{"master" "none"} worktree-name))
+          :when (not (fs/exists? (fs/path worktree-path ".git")))]
+    (println "Creating worktree" worktree-path)
+    (sh-ok "git" "-C" (str project-root) "worktree" "add" "--force"
+           "-B" (str "swarmforge-" worktree-name) worktree-path "HEAD")))
+
+(defn sync-scripts! [rows]
+  (doseq [path (distinct (map :worktree-path rows))
+          :let [target (fs/path path "swarmforge" "scripts")]
+          :when (not= (str target) (str scripts-src))]
+    (fs/create-dirs target)
+    (doseq [script (fs/list-dir scripts-src)]
+      (fs/copy script (fs/path target (fs/file-name script))
+               {:replace-existing true :copy-attributes true}))))
+
+(defn write-roles-tsv! [rows]
+  (fs/create-dirs state-dir)
+  (spit (str (fs/path state-dir "roles.tsv"))
+        (str/join "" (for [{:keys [role worktree-name worktree-path agent-kind receive-mode]} rows]
+                       (str (str/join "\t" [role worktree-name worktree-path
+                                            role role agent-kind receive-mode])
+                            "\n")))))
+
+(defn ensure-queue-dirs! [rows]
+  (doseq [path (distinct (map :worktree-path rows))
+          sub [["outbox" "tmp"] ["sent"] ["failed"]
+               ["inbox" "new"] ["inbox" "in_process"] ["inbox" "completed"]]]
+    (fs/create-dirs (apply fs/path path ".swarmforge" "handoffs" sub))))
+
+;; --- herdr ----------------------------------------------------------------
+
+(defn herdr
+  "Run a herdr subcommand; return parsed JSON when the output is JSON,
+  otherwise the raw output string."
+  [& args]
+  (let [{:keys [exit out err]} (apply process/sh {:continue true} "herdr" args)]
+    (when-not (zero? exit)
+      (die (str "herdr " (str/join " " args) " failed:")
+           (str/trim (str out "\n" err))
+           "" "Is the herdr server running? Start it with `herdr` (or `herdr server`)."))
+    (let [trimmed (str/trim out)]
+      (if (or (str/starts-with? trimmed "{") (str/starts-with? trimmed "["))
+        (json/parse-string trimmed true)
+        trimmed))))
+
+(defn find-id
+  "Defensively extract an id from herdr JSON: prefer keys containing `hint`
+  and ending in id, then a bare :id, searching depth-first."
+  [data hint]
+  (letfn [(search [node pred]
+            (cond
+              (map? node) (or (some (fn [[k v]] (when (and (pred (name k)) (string? v)) v))
+                                    node)
+                              (some #(search % pred) (vals node)))
+              (sequential? node) (some #(search % pred) node)))]
+    (or (search data #(and (str/includes? (str/lower-case %) hint)
+                           (str/ends-with? (str/lower-case %) "id")))
+        (search data #(= "id" (str/lower-case %)))
+        (die (str "Could not find a " hint " id in herdr output:")
+             (json/generate-string data)))))
+
+(defn bootstrap-prompt [role]
+  (let [role-prompt (fs/path project-root "swarmforge" "roles" (str role ".prompt"))
+        constitution (fs/path project-root "swarmforge" "constitution.prompt")]
+    (str "You are the '" role "' role in a SwarmForge-style swarm. "
+         (if (fs/exists? constitution)
+           (str "Read swarmforge/constitution.prompt"
+                (when (fs/exists? role-prompt)
+                  (str " and swarmforge/roles/" role ".prompt"))
+                " and follow them exactly. ")
+           "Work only in this directory; hand completed work to other roles as commits. ")
+         "When you receive a handoff wake-up (or right now, and after every "
+         "completed task), run swarmforge/scripts/ready_for_next.sh and follow "
+         "its output. Send handoffs only through swarmforge/scripts/swarm_handoff.sh. "
+         "When your current task is fully complete, run "
+         "swarmforge/scripts/done_with_current.sh.")))
+
+(defn launch-agents! [rows]
+  (let [workspace (herdr "workspace" "create"
+                         "--cwd" (str project-root)
+                         "--label" (str "swarm:" (fs/file-name project-root))
+                         "--no-focus")
+        workspace-id (find-id workspace "workspace")]
+    (spit (str (fs/path state-dir "herdr-workspace")) (str workspace-id "\n"))
+    (doseq [{:keys [role agent-kind worktree-path extra-args]} rows]
+      (println "Starting" role (str "(" agent-kind ")") "in" worktree-path)
+      (let [tab (herdr "tab" "create"
+                       "--workspace" workspace-id
+                       "--cwd" worktree-path
+                       "--label" role
+                       "--env" (str "SWARMFORGE_ROLE=" role)
+                       "--no-focus")
+            pane-id (find-id tab "pane")]
+        (apply herdr "agent" "start" role "--kind" agent-kind "--pane" pane-id
+               (when (seq extra-args) (cons "--" extra-args)))
+        (herdr "agent" "prompt" role (bootstrap-prompt role))))
+    workspace-id))
+
+;; --- daemon lifecycle -----------------------------------------------------
+
+(def daemon-dir (fs/path state-dir "daemon"))
+(def pid-file (fs/path daemon-dir "handoffd.pid"))
+
+(defn daemon-pid []
+  (when (fs/exists? pid-file)
+    (parse-long (str/trim (slurp (str pid-file))))))
+
+(defn daemon-running? []
+  (when-let [pid (daemon-pid)]
+    (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.isAlive))))
+
+(defn start-daemon! []
+  (if (daemon-running?)
+    (println "handoffd already running, pid" (daemon-pid))
+    (do
+      (fs/create-dirs daemon-dir)
+      (fs/delete-if-exists (fs/path daemon-dir "stop"))
+      (let [log (fs/file (fs/path daemon-dir "handoffd.log"))
+            proc (process/process
+                  ["bb" (str (fs/path scripts-src "handoffd.bb")) (str project-root)]
+                  {:out :append :out-file log :err :append :err-file log})]
+        (println "handoffd started, pid" (.pid (:proc proc)))))))
+
+(defn stop-daemon! []
+  (fs/create-dirs daemon-dir)
+  (spit (str (fs/path daemon-dir "stop")) "")
+  (when-let [pid (daemon-pid)]
+    (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.destroy)))
+  (println "handoffd stop requested."))
+
+;; --- subcommands ----------------------------------------------------------
+
+(defn init! [pack]
+  (let [source (fs/path tool-root "packs" (str pack ".conf"))]
+    (when-not (and pack (fs/exists? source))
+      (die (str "Unknown pack: " pack)
+           (str "Available: " (str/join ", " (map #(str/replace (fs/file-name %) #"\.conf$" "")
+                                                  (fs/list-dir (fs/path tool-root "packs")))))))
+    (when (fs/exists? conf-file)
+      (die (str conf-file " already exists; edit it or remove it first.")))
+    (fs/create-dirs (fs/parent conf-file))
+    (fs/copy source conf-file)
+    (println "Wrote" (str conf-file))
+    (println "Review the agent kinds in it, then run `swarm up` from a running herdr session.")))
+
+(defn up! []
+  (when-not (fs/exists? (fs/path project-root ".git"))
+    (die "Run swarm from the root of a git repository."))
+  (let [rows (parse-conf)]
+    (ensure-gitignore!)
+    (ensure-worktrees! rows)
+    (ensure-queue-dirs! rows)
+    (sync-scripts! rows)
+    (write-roles-tsv! rows)
+    (launch-agents! rows)
+    (start-daemon!)
+    (println)
+    (println "Swarm is up:" (str/join ", " (map :role rows)))
+    (println "Watch it in herdr; stop it with `swarm down`.")))
+
+(defn down! []
+  (stop-daemon!)
+  (let [ws-file (fs/path state-dir "herdr-workspace")]
+    (if (fs/exists? ws-file)
+      (let [workspace-id (str/trim (slurp (str ws-file)))]
+        (herdr "workspace" "close" workspace-id)
+        (fs/delete ws-file)
+        (println "Closed herdr workspace" workspace-id))
+      (println "No recorded herdr workspace; close it in herdr if one is open."))))
+
+(defn status! []
+  (println "project:" (str project-root))
+  (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init <pack>`)"))
+  (println "daemon: " (if (daemon-running?) (str "running, pid " (daemon-pid)) "not running"))
+  (when (fs/exists? (fs/path state-dir "roles.tsv"))
+    (doseq [line (str/split-lines (slurp (str (fs/path state-dir "roles.tsv"))))
+            :let [[role _ path _ _ kind mode] (str/split line #"\t" -1)]]
+      (println (format "role:    %-12s %-8s %-5s %s" role kind mode path)))))
+
+(defn -main [args]
+  (case (first args)
+    "init" (init! (second args))
+    "up" (up!)
+    nil (up!)
+    "down" (down!)
+    "status" (status!)
+    (die (str "Unknown subcommand: " (first args))
+         "Usage: swarm [init <pack> | up | down | status]")))
+
+(-main *command-line-args*)

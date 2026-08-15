@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# close-swarm — stop the swarm in the current project (alias for `swarm down`).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec bb "$DIR/swarm" down

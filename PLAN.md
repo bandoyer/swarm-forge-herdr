@@ -10,10 +10,14 @@ to a [herdr](https://herdr.dev)-native runtime. Legend: **build** (new code),
 - [x] Repo, MIT license, README, this plan
 - [ ] (Optional) upstream issue asking for a LICENSE file
 
-## Phase 1 — Core runtime (critical path)
+## Phase 1 — Core runtime (critical path) ✅
 
-Implementation language: **Babashka**, same as upstream — port by transcription,
-not translation. Herdr absorbs session/worktree/window management.
+Implementation language: **Babashka**, same as upstream. Herdr absorbs
+session/worktree/window management. Done 2026-08-15: shared `handoff_lib.bb`
++ 7 entry scripts, `handoffd.bb` (herdr wake-ups, `--once` test mode),
+`bin/swarm` (init/up/down/status), `packs/*.conf`, 19-check `test/smoke.sh`
+green. Deviations documented in PORTING.md. Live `swarm up` against running
+agents still unvalidated — that is Phase 4.
 
 | Component | Upstream | Verdict |
 |---|---|---|
