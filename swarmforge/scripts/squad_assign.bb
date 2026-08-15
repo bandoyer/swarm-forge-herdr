@@ -7,10 +7,12 @@
 ;;   assignments/<id>/result.handoff  the worker's result, once recorded
 ;;   events.log                       append-only timestamped state changes
 ;;
-;; Lifecycle: created -> spawned -> result -> accepted | rejected (-> merged).
-;; This tool owns created/spawned/result/accepted/rejected and replacement
-;; links; the daemon writes merged (S3). Illegal transitions exit 2 with an
-;; INVALID_TRANSITION token.
+;; Lifecycle: created -> spawned -> result -> accepted -> merged, with
+;; rejected and merge-blocked as the review/merge failure exits. This tool
+;; owns created/spawned/result/accepted/rejected and replacement links; the
+;; `merge` and `merge-blocked` subcommands are daemon-only (squadd, S3) —
+;; nothing but the daemon moves an assignment past accepted. Illegal
+;; transitions exit 2 with an INVALID_TRANSITION token.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
@@ -26,7 +28,9 @@
        "  result <id> <handoff-file>\n"
        "  accept <id>\n"
        "  reject <id> <reason...>\n"
-       "  replace <old-id> <new-id> <template> <instructions-file>"))
+       "  replace <old-id> <new-id> <template> <instructions-file>\n"
+       "  merge <id>                    (daemon-only)\n"
+       "  merge-blocked <id> <detail...> (daemon-only)"))
 
 ;; --- assignment records ---------------------------------------------------
 
@@ -43,10 +47,12 @@
   (the normal path) and :created (leader-routed work before spawn exists);
   reject accepts :spawned so a worker that dies without a result can still
   be closed out."
-  {:spawned  #{:created}
-   :result   #{:created :spawned}
-   :accepted #{:result}
-   :rejected #{:result :spawned}})
+  {:spawned       #{:created}
+   :result        #{:created :spawned}
+   :accepted      #{:result}
+   :rejected      #{:result :spawned}
+   :merged        #{:accepted}
+   :merge-blocked #{:accepted}})
 
 (defn- transition! [id new-state opts]
   (squad-lib/transition! (merge {:file (squad-lib/status-file id)
@@ -112,10 +118,18 @@
   (transition! id :rejected {:extra {:reason reason}
                              :detail (str "reason=" reason)}))
 
+(defn merge! [id]
+  (transition! id :merged {}))
+
+(defn merge-blocked! [id detail]
+  (transition! id :merge-blocked {:extra {:reason detail}
+                                  :detail (str "detail=" detail)}))
+
 (def replaceable-states
   "An accepted (or merged) assignment is finished work; only unfinished
-  ones can be replaced."
-  #{:created :spawned :result :rejected})
+  ones can be replaced. :merge-blocked is replaceable so the leader can
+  route a merger assignment for the conflicted work (S3 route-merger)."
+  #{:created :spawned :result :rejected :merge-blocked})
 
 (defn replace!
   "Retire old-id's assignment and reissue it as new-id, linking the two
@@ -149,6 +163,10 @@
       "accept" (if (= 1 (count params)) (accept! (first params)) (usage-die))
       "reject" (if (<= 2 (count params)) (reject! (first params) (str/join " " (rest params))) (usage-die))
       "replace" (if (= 4 (count params)) (apply replace! params) (usage-die))
+      "merge" (if (= 1 (count params)) (merge! (first params)) (usage-die))
+      "merge-blocked" (if (<= 2 (count params))
+                        (merge-blocked! (first params) (str/join " " (rest params)))
+                        (usage-die))
       (usage-die))))
 
 (handoff-lib/run-entry #(-main *command-line-args*))

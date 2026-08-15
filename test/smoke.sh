@@ -581,5 +581,160 @@ fi
 ok "free-text detail cannot forge audit-log lines"
 cd "$CODER"
 
+step "squadd: simulator project (leader row, scripted workers, no agents)"
+SQ="$WORK/squadproj"
+mkdir -p "$SQ"
+git -C "$SQ" init -qb main
+echo "base line" > "$SQ/sim.txt"
+git -C "$SQ" add sim.txt
+git -C "$SQ" -c user.email=smoke@test -c user.name=smoke commit -qm "initial"
+mkdir -p "$SQ/.swarmforge" "$SQ/swarmforge"
+printf 'squad-leader\tmaster\t%s\tsquad-leader\tsquad-leader\tclaude\ttask\n' "$SQ" \
+  > "$SQ/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$SQ/swarmforge/scripts"
+cd "$SQ"
+export SWARMFORGE_NO_AGENT=1
+export SWARM_BIN="$TOOL_ROOT/bin/swarm"
+echo "Do the work." > instr.md
+play_worker() { # play_worker <worker> <assignment> <sim.txt content>
+  # The scripted worker: commit a real change in the worker worktree and
+  # hand it to the leader exactly as a live worker would.
+  local wt=".worktrees/$1"
+  echo "$3" > "$wt/sim.txt"
+  git -C "$wt" add sim.txt
+  git -C "$wt" -c user.email=smoke@test -c user.name=smoke commit -qm "work for $2"
+  printf 'type: git_handoff\nto: squad-leader\npriority: 50\ntask: %s\ncommit: %s\n' \
+    "$2" "$(git -C "$wt" rev-parse --short=10 HEAD)" > "$wt/draft.txt"
+  (cd "$wt" && SWARMFORGE_ROLE="$1" swarmforge/scripts/swarm_handoff.sh draft.txt > /dev/null)
+}
+record_result() { # record_result <assignment> <worker>
+  local file
+  file="$(ls .swarmforge/handoffs/inbox/new/*_from_"$2"_*.handoff)"
+  "$SCRIPTS/squad_assign.sh" result "$1" "$file" > /dev/null
+}
+[ -f swarmforge/scripts/squadd.bb ] || fail "squadd.bb missing"
+ok "simulator project prepared"
+
+step "squadd: spawn pass (assignment spawned, worker active, request consumed)"
+"$SCRIPTS/squad_assign.sh" create d1 implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d1 implementer > /dev/null
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+W1=squadproj-implementer-d1
+OUT="$("$SCRIPTS/squad_assign.sh" status d1)"
+expect "d1 spawned by daemon" "STATE: spawned" <<<"$OUT"
+grep -q ':state :active' ".swarmforge/squad/workers/$W1.edn" || fail "worker $W1 not active"
+ok "worker active"
+[ ! -e .swarmforge/squad/spawn-requests/d1.edn ] || fail "spawn-request not consumed"
+ok "spawn-request consumed"
+grep -q "^$W1	" .swarmforge/roles.tsv || fail "worker not registered for routing"
+ok "worker registered"
+grep -q ' d1 squadd-spawn' .swarmforge/squad/events.log || fail "squadd-spawn not logged"
+ok "squadd-spawn logged to events.log"
+
+step "squadd: merge pass (accepted result lands on main)"
+play_worker "$W1" d1 "d1 version"
+bb "$SCRIPTS/handoffd.bb" "$SQ" --once
+record_result d1 "$W1"
+"$SCRIPTS/squad_assign.sh" accept d1 > /dev/null
+C1="$(git -C ".worktrees/$W1" rev-parse HEAD)"
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+OUT="$("$SCRIPTS/squad_assign.sh" status d1)"
+expect "d1 merged" "STATE: merged" <<<"$OUT"
+git merge-base --is-ancestor "$C1" HEAD || fail "worker commit not reachable from main"
+ok "worker commit reachable from main"
+[ "$(cat sim.txt)" = "d1 version" ] || fail "worker change not visible on main"
+ok "worker change visible on main"
+grep -q ' d1 squadd-merge' .swarmforge/squad/events.log || fail "squadd-merge not logged"
+ok "squadd-merge logged"
+
+step "squadd: retire pass (merged assignment's worker retired)"
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+grep -q ':state :retired' ".swarmforge/squad/workers/$W1.edn" || fail "worker not retired"
+ok "worker record retired"
+if grep -q "^$W1	" .swarmforge/roles.tsv; then fail "worker still registered"; fi
+ok "worker deregistered"
+[ ! -d ".worktrees/$W1" ] || fail "worker worktree not removed"
+ok "worker worktree removed"
+grep -q " $W1 squadd-retire-worker" .swarmforge/squad/events.log || fail "retire not logged"
+ok "squadd-retire-worker logged"
+
+step "squadd: merged state rejects further transitions"
+set +e
+OUT="$("$SCRIPTS/squad_assign.sh" merge d1 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "re-merge should exit 2, got $STATUS"
+expect "merge illegal transition" "INVALID_TRANSITION" <<<"$OUT"
+
+step "squadd: conflict path (first merges, second goes merge-blocked)"
+"$SCRIPTS/squad_assign.sh" create d2 implementer instr.md > /dev/null
+"$SCRIPTS/squad_assign.sh" create d3 implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d2 implementer > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d3 implementer > /dev/null
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+W2=squadproj-implementer-d2
+W3=squadproj-implementer-d3
+{ [ -d ".worktrees/$W2" ] && [ -d ".worktrees/$W3" ]; } || fail "both workers should spawn in one pass"
+ok "both workers spawned in one pass"
+play_worker "$W2" d2 "d2 version"
+play_worker "$W3" d3 "d3 version"
+bb "$SCRIPTS/handoffd.bb" "$SQ" --once
+record_result d2 "$W2"
+record_result d3 "$W3"
+"$SCRIPTS/squad_assign.sh" accept d2 > /dev/null
+"$SCRIPTS/squad_assign.sh" accept d3 > /dev/null
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+OUT="$("$SCRIPTS/squad_assign.sh" status d2)"
+expect "d2 merged" "STATE: merged" <<<"$OUT"
+[ "$(cat sim.txt)" = "d2 version" ] || fail "d2's commit should win on main"
+ok "d2 on main"
+OUT="$("$SCRIPTS/squad_assign.sh" status d3)"
+expect "d3 merge-blocked" "STATE: merge-blocked" <<<"$OUT"
+expect "d3 carries conflict detail" "REASON:" <<<"$OUT"
+[ ! -e .git/MERGE_HEAD ] || fail "conflicted merge not aborted"
+ok "conflicted merge aborted cleanly"
+grep -q ' d3 squadd-merge-blocked' .swarmforge/squad/events.log || fail "merge-blocked not logged"
+ok "squadd-merge-blocked logged"
+OUT="$("$SCRIPTS/squad_next.sh" --residual-only)"
+grep -A3 '^NEXT_ACTION: route-merger$' <<<"$OUT" | grep -q 'TARGET: d3' \
+  || { echo "$OUT"; fail "advisor should route a merger for d3"; }
+ok "advisor emits route-merger for d3"
+grep -q 'residual-new' .swarmforge/squad/daemon/squadd.log || fail "new residual not logged"
+ok "daemon noticed the new residual"
+
+step "squadd: merge-blocked assignment is replaceable (merger routing)"
+OUT="$("$SCRIPTS/squad_assign.sh" replace d3 d3m merger instr.md)"
+expect "merge-blocked replaced" "ASSIGNMENT_REPLACED: d3 -> d3m" <<<"$OUT"
+
+step "squadd: stale request dropped, merged worker retired, same pass"
+"$SCRIPTS/squad_assign.sh" create d4 implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d4 implementer > /dev/null
+"$SCRIPTS/squad_assign.sh" result d4 instr.md > /dev/null
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+[ ! -e .swarmforge/squad/spawn-requests/d4.edn ] || fail "stale request should be dropped"
+ok "stale request dropped"
+grep -q ' d4 squadd-drop-stale-spawn-request' .swarmforge/squad/events.log || fail "stale drop not logged"
+ok "stale drop logged"
+grep -q ':state :retired' ".swarmforge/squad/workers/$W2.edn" || fail "d2's worker should retire"
+ok "merged assignment's worker retired"
+
+step "squadd: spawn failure leaves the request for retry"
+"$SCRIPTS/squad_assign.sh" create d5 implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d5 implementer > /dev/null
+SWARM_BIN=/bin/false bb "$SCRIPTS/squadd.bb" "$SQ" --once
+[ -e .swarmforge/squad/spawn-requests/d5.edn ] || fail "failed spawn must leave the request"
+ok "request survives failed spawn"
+OUT="$("$SCRIPTS/squad_assign.sh" status d5)"
+expect "d5 still created" "STATE: created" <<<"$OUT"
+grep -q 'spawn-failed d5' .swarmforge/squad/daemon/squadd.log || fail "spawn failure not logged"
+ok "spawn failure logged"
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+OUT="$("$SCRIPTS/squad_assign.sh" status d5)"
+expect "d5 spawned on retry" "STATE: spawned" <<<"$OUT"
+[ ! -e .swarmforge/squad/spawn-requests/d5.edn ] || fail "request should be consumed on retry"
+ok "retry consumed the request"
+unset SWARMFORGE_NO_AGENT SWARM_BIN
+cd "$CODER"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"

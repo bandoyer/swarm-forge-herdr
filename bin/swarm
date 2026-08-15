@@ -283,37 +283,47 @@
     @needs-attention))
 
 ;; --- daemon lifecycle -----------------------------------------------------
+;; Both daemons share one convention: <dir>/<name>.{pid,log} plus a stop
+;; file. handoffd routes handoffs; squadd (S3) applies the squad advisor's
+;; mechanical actions, and is started with SWARM_BIN pointing back at this
+;; launcher so its spawn/retire shell-outs run the same binary.
 
-(def daemon-dir (fs/path state-dir "daemon"))
-(def pid-file (fs/path daemon-dir "handoffd.pid"))
+(def handoffd-daemon
+  {:name "handoffd" :dir (fs/path state-dir "daemon")})
 
-(defn daemon-pid []
-  (when (fs/exists? pid-file)
-    (parse-long (str/trim (slurp (str pid-file))))))
+(def squadd-daemon
+  {:name "squadd" :dir (fs/path state-dir "squad" "daemon")
+   :env {"SWARM_BIN" (str (fs/path tool-root "bin" "swarm"))}})
 
-(defn daemon-running? []
-  (when-let [pid (daemon-pid)]
+(defn daemon-pid [{:keys [dir name]}]
+  (let [pid-file (fs/path dir (str name ".pid"))]
+    (when (fs/exists? pid-file)
+      (parse-long (str/trim (slurp (str pid-file)))))))
+
+(defn daemon-running? [daemon]
+  (when-let [pid (daemon-pid daemon)]
     (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.isAlive))))
 
-(defn start-daemon! []
-  (if (daemon-running?)
-    (println "handoffd already running, pid" (daemon-pid))
+(defn start-daemon! [{:keys [name dir env] :as daemon}]
+  (if (daemon-running? daemon)
+    (println name "already running, pid" (daemon-pid daemon))
     (do
-      (fs/create-dirs daemon-dir)
-      (fs/delete-if-exists (fs/path daemon-dir "stop"))
-      (let [log (fs/file (fs/path daemon-dir "handoffd.log"))
+      (fs/create-dirs dir)
+      (fs/delete-if-exists (fs/path dir "stop"))
+      (let [log (fs/file (fs/path dir (str name ".log")))
             proc (process/process
-                  ["bb" (str (fs/path scripts-src "handoffd.bb")) (str project-root)]
-                  {:out :append :out-file log :err :append :err-file log})]
-        (slog! "up: handoffd started, pid" (.pid (:proc proc)))
-        (println "handoffd started, pid" (.pid (:proc proc)))))))
+                  ["bb" (str (fs/path scripts-src (str name ".bb"))) (str project-root)]
+                  (cond-> {:out :append :out-file log :err :append :err-file log}
+                    env (assoc :extra-env env)))]
+        (slog! "up:" name "started, pid" (.pid (:proc proc)))
+        (println name "started, pid" (.pid (:proc proc)))))))
 
-(defn stop-daemon! []
-  (fs/create-dirs daemon-dir)
-  (spit (str (fs/path daemon-dir "stop")) "")
-  (when-let [pid (daemon-pid)]
+(defn stop-daemon! [{:keys [name dir] :as daemon}]
+  (fs/create-dirs dir)
+  (spit (str (fs/path dir "stop")) "")
+  (when-let [pid (daemon-pid daemon)]
     (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.destroy)))
-  (println "handoffd stop requested."))
+  (println name "stop requested."))
 
 ;; --- subcommands ----------------------------------------------------------
 
@@ -426,7 +436,7 @@
     (sync-scripts! rows)
     (write-roles-tsv! rows)
     (let [needs-attention (launch-agents! rows)]
-      (start-daemon!)
+      (start-daemon! handoffd-daemon)
       (println)
       (println "Swarm is up:" (str/join ", " (map :role rows)))
       (when (seq needs-attention)
@@ -451,7 +461,8 @@
 
 (defn down! []
   (slog! "down: requested")
-  (stop-daemon!)
+  (stop-daemon! handoffd-daemon)
+  (stop-daemon! squadd-daemon)
   (let [ws-file (fs/path state-dir "herdr-workspace")]
     (if (fs/exists? ws-file)
       (let [workspace-id (str/trim (slurp (str ws-file)))]
@@ -505,6 +516,7 @@
         events (sort-by first
                         (concat (tagged-lines (fs/path state-dir "swarm.log") "[swarm] ")
                                 (tagged-lines (fs/path state-dir "daemon" "handoffd.log") "[router]")
+                                (tagged-lines (fs/path state-dir "squad" "daemon" "squadd.log") "[squadd]")
                                 queue-events))]
     (doseq [[t message] (take-last n events)]
       (println t message))))
@@ -521,7 +533,11 @@
 (defn status! []
   (println "project:" (str project-root))
   (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init <pack>`)"))
-  (println "daemon: " (if (daemon-running?) (str "running, pid " (daemon-pid)) "not running"))
+  (doseq [daemon [handoffd-daemon squadd-daemon]]
+    (println (format "%-9s" (str (:name daemon) ":"))
+             (if (daemon-running? daemon)
+               (str "running, pid " (daemon-pid daemon))
+               "not running")))
   (when (fs/exists? (fs/path state-dir "roles.tsv"))
     (doseq [line (str/split-lines (slurp (str (fs/path state-dir "roles.tsv"))))
             :let [[role _ path _ _ kind mode] (str/split line #"\t" -1)]]
@@ -581,7 +597,7 @@
 (defn squad-up! [kind-arg]
   (when-not (fs/exists? (fs/path project-root ".git"))
     (die "Run swarm from the root of a git repository."))
-  (when (and (daemon-running?)
+  (when (and (daemon-running? handoffd-daemon)
              (seq (roles-rows))
              (not-any? #(= leader-name (first %)) (roles-rows)))
     (die "A pack swarm is active in this project; run `swarm down` first."))
@@ -620,7 +636,8 @@
                         "report to the user that the squad is ready and wait for direction."))
             (println "squad-leader started but BLOCKED (startup dialog); answer it, then `swarm bootstrap squad-leader` equivalent: rerun `swarm squad up`."))
           (slog! "squad-up: leader started as" agent-name))))
-    (start-daemon!)
+    (start-daemon! handoffd-daemon)
+    (start-daemon! squadd-daemon)
     (println)
     (println "Squad is up. Talk to the squad-leader pane, or seed it with:")
     (println "  herdr agent prompt" (project-agent-name leader-name) "\"<your request>\"")))
