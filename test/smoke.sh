@@ -149,5 +149,61 @@ set -e
 [ "$STATUS" -eq 1 ] || fail "empty done should exit 1, got $STATUS"
 expect "empty done reports NO_CURRENT_TASK" "NO_CURRENT_TASK" <<<"$OUT"
 
+step "squad: create/status/result/accept lifecycle"
+cd "$CODER"
+echo "Implement the thing." > instructions.md
+OUT="$("$SCRIPTS/squad_assign.sh" create a1 implementer instructions.md)"
+expect "assignment created" "ASSIGNMENT_CREATED: a1" <<<"$OUT"
+[ -f .swarmforge/squad/assignments/a1/assignment.md ] || fail "assignment.md not written"
+ok "assignment.md written"
+OUT="$("$SCRIPTS/squad_assign.sh" status a1)"
+expect "status reports created" "STATE: created" <<<"$OUT"
+echo "worker output" > worker.handoff
+OUT="$("$SCRIPTS/squad_assign.sh" result a1 worker.handoff)"
+expect "result transition" "ASSIGNMENT_STATE: a1 created -> result" <<<"$OUT"
+[ -f .swarmforge/squad/assignments/a1/result.handoff ] || fail "result handoff not stored"
+ok "result handoff stored"
+OUT="$("$SCRIPTS/squad_assign.sh" accept a1)"
+expect "accept transition" "ASSIGNMENT_STATE: a1 result -> accepted" <<<"$OUT"
+
+step "squad: reject records the reason"
+"$SCRIPTS/squad_assign.sh" create a2 implementer instructions.md > /dev/null
+"$SCRIPTS/squad_assign.sh" result a2 worker.handoff > /dev/null
+OUT="$("$SCRIPTS/squad_assign.sh" reject a2 missing unit tests)"
+expect "reject transition" "ASSIGNMENT_STATE: a2 result -> rejected" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_assign.sh" status a2)"
+expect "status reports rejected" "STATE: rejected" <<<"$OUT"
+expect "status carries reason" "REASON: missing unit tests" <<<"$OUT"
+
+step "squad: illegal transition exits 2 with INVALID_TRANSITION"
+set +e
+OUT="$("$SCRIPTS/squad_assign.sh" accept a1 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "illegal transition should exit 2, got $STATUS"
+expect "illegal transition token" "INVALID_TRANSITION" <<<"$OUT"
+
+step "squad: replace links old and new assignments"
+OUT="$("$SCRIPTS/squad_assign.sh" replace a2 a3 implementer instructions.md)"
+expect "replacement announced" "ASSIGNMENT_REPLACED: a2 -> a3" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_assign.sh" status a2)"
+expect "old links forward" "REPLACED_BY: a3" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_assign.sh" status a3)"
+expect "new links back" "REPLACES: a2" <<<"$OUT"
+expect "new starts created" "STATE: created" <<<"$OUT"
+
+step "squad: events.log holds one timestamped line per state change"
+LOG="$CODER/.swarmforge/squad/events.log"
+[ -f "$LOG" ] || fail "events.log missing"
+[ "$(grep -c ' a1 ' "$LOG")" -eq 3 ] || { cat "$LOG"; fail "a1 should log 3 events (created/result/accepted)"; }
+ok "a1 logged created/result/accepted"
+[ "$(grep -c ' a2 ' "$LOG")" -eq 4 ] || { cat "$LOG"; fail "a2 should log 4 events (created/result/rejected/replaced)"; }
+ok "a2 logged created/result/rejected/replaced"
+[ -z "$(grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z ' "$LOG")" ] || { cat "$LOG"; fail "events.log lines must be timestamped"; }
+ok "all events.log lines timestamped"
+grep -q ' a2 rejected reason=missing unit tests' "$LOG" || { cat "$LOG"; fail "reject reason not logged"; }
+ok "reject reason logged"
+rm -f instructions.md worker.handoff
+
 echo
 echo "SMOKE PASSED ($PASS checks)"
