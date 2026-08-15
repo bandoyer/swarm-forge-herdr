@@ -332,6 +332,29 @@ set -e
 [ "$STATUS" -eq 1 ] || fail "re-spawn of spawned assignment should fail, got $STATUS"
 expect "re-spawn rejected" "not 'created'" <<<"$OUT"
 
+step "squad: worker contracts fall back to the template contract"
+mkdir -p "$CODER/swarmforge/contracts"
+cat > "$CODER/swarmforge/contracts/implementer.contract.edn" <<'EDN'
+{:role "implementer"
+ :artifact-roots ["src/"]
+ :required-evidence [{:name "tests-green" :pattern "(?i)tests? passed"}]}
+EDN
+cd "$CODER/.worktrees/$WORKER"
+echo w > forbidden2.txt && git add forbidden2.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "worker commit, no evidence"
+WBAD="$(git rev-parse --short=10 HEAD)"
+printf 'type: git_handoff\nto: coder\npriority: 50\ntask: wct\ncommit: %s\n' "$WBAD" > draft.txt
+set +e
+OUT="$(SWARMFORGE_ROLE="$WORKER" "$SCRIPTS/swarm_handoff.sh" draft.txt 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "worker contract violation should exit 2, got $STATUS"
+expect "worker gated by template contract: paths" "outside role $WORKER's artifact roots" <<<"$OUT"
+expect "worker gated by template contract: evidence" "required evidence 'tests-green'" <<<"$OUT"
+rm -f draft.txt
+cd "$CODER"
+rm -rf "$CODER/swarmforge/contracts"
+
 step "squad: retire frees routing and worktree"
 OUT="$("$SWARM" squad retire "$WORKER" done --no-agent)"
 expect "retire reports worker" "WORKER_RETIRED: $WORKER" <<<"$OUT"

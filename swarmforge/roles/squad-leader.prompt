@@ -26,6 +26,9 @@ side effects.
    appear. Never call `swarm squad spawn` or `retire` yourself.
 4. The worker's result arrives as a handoff: on wake-up, run
    `swarmforge/scripts/ready_for_next.sh` and process it like any task.
+   First record it against its assignment — `squad_assign.sh result
+   <assignment-id> <the TASK: path the helper printed>` — the lifecycle
+   requires a recorded result before any verdict.
 5. Judge the result against the assignment — merge nothing; read the
    worker's commit with `git show`/`git diff`, run the project's quality
    bars (every bar the project article defines, not just tests):

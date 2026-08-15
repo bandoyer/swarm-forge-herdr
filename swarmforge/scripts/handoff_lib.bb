@@ -108,11 +108,26 @@
 ;; role may author and what evidence its commits must carry. Absent
 ;; contract = no enforcement, so adoption is progressive.
 
-(defn role-contract [role-name]
-  (let [file (fs/path (project-root) "swarmforge" "contracts"
-                      (str role-name ".contract.edn"))]
-    (when (fs/exists? file)
-      (edn/read-string (slurp (str file))))))
+(defn role-contract
+  "Contract for a role. Transient squad workers have generated names, so
+  when no contract file matches the name directly, fall back to the
+  worker's template contract — contracts bind the workforce too."
+  [role-name]
+  (let [contract-file #(fs/path (project-root) "swarmforge" "contracts"
+                                (str % ".contract.edn"))
+        direct (contract-file role-name)]
+    (cond
+      (fs/exists? direct)
+      (edn/read-string (slurp (str direct)))
+
+      :else
+      (let [worker-record (fs/path (project-root) ".swarmforge" "squad"
+                                   "workers" (str role-name ".edn"))]
+        (when (fs/exists? worker-record)
+          (let [template (:template (edn/read-string (slurp (str worker-record))))
+                fallback (contract-file template)]
+            (when (and template (fs/exists? fallback))
+              (edn/read-string (slurp (str fallback))))))))))
 
 (defn- git-lines [& args]
   (let [{:keys [exit out]} (apply process/sh {:continue true} args)]

@@ -517,6 +517,7 @@
                         (concat (tagged-lines (fs/path state-dir "swarm.log") "[swarm] ")
                                 (tagged-lines (fs/path state-dir "daemon" "handoffd.log") "[router]")
                                 (tagged-lines (fs/path state-dir "squad" "daemon" "squadd.log") "[squadd]")
+                                (tagged-lines (fs/path state-dir "squad" "events.log") "[squad] ")
                                 queue-events))]
     (doseq [[t message] (take-last n events)]
       (println t message))))
