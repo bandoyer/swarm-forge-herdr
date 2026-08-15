@@ -13,7 +13,6 @@
 
 (ns squad-worker
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn]
             [clojure.string :as str]))
 
 (def usage-text
@@ -25,8 +24,6 @@
 
 ;; --- worker records -------------------------------------------------------
 
-(defn workers-dir [] (fs/path (squad-lib/squad-dir) "workers"))
-
 (defn worker-file
   "Resolve a worker record path. Names are validated against herdr's
   agent-name shape before touching the filesystem, so a hostile name can
@@ -35,22 +32,7 @@
   (when-not (re-matches #"[a-z][a-z0-9_-]{0,31}" (str worker-name))
     (handoff-lib/die 2 (str "INVALID_WORKER_NAME: '" worker-name
                             "' (expected lowercase name, max 32 chars)")))
-  (fs/path (workers-dir) (str worker-name ".edn")))
-
-(def active-states
-  "States that occupy a worker slot and count against the capacity cap."
-  #{:allocated :active})
-
-(defn all-workers []
-  (if (fs/exists? (workers-dir))
-    (->> (fs/list-dir (workers-dir))
-         (filter #(str/ends-with? (fs/file-name %) ".edn"))
-         (map #(edn/read-string (slurp (str %))))
-         (sort-by :name)
-         vec)
-    []))
-
-(defn active-count [] (count (filter #(active-states (:state %)) (all-workers))))
+  (fs/path (squad-lib/workers-dir) (str worker-name ".edn")))
 
 ;; --- naming ---------------------------------------------------------------
 
@@ -98,10 +80,10 @@
         cap (squad-lib/max-transient-agents)]
     (when (fs/exists? file)
       (handoff-lib/die 2 (str "WORKER_EXISTS: " worker)))
-    (when (>= (active-count) cap)
+    (when (>= (squad-lib/active-count) cap)
       (handoff-lib/die 2 (format "CAPACITY_EXHAUSTED: %d active workers, max_transient_agents %d"
-                                 (active-count) cap)))
-    (fs/create-dirs (workers-dir))
+                                 (squad-lib/active-count) cap)))
+    (fs/create-dirs (squad-lib/workers-dir))
     (squad-lib/write-record! file {:name worker
                                    :template template
                                    :assignment assignment-id
@@ -121,8 +103,8 @@
                  {:extra {:reason reason} :detail (str "reason=" reason)})))
 
 (defn list! [active-only?]
-  (let [workers (all-workers)
-        active (filter #(active-states (:state %)) workers)
+  (let [workers (squad-lib/all-workers)
+        active (filter #(squad-lib/active-states (:state %)) workers)
         shown (if active-only? active workers)]
     (doseq [{worker :name :keys [state template assignment]} shown]
       (println worker (name state) template assignment))

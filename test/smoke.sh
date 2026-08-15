@@ -340,5 +340,180 @@ ok "worker deregistered"
 [ ! -d ".worktrees/$WORKER" ] || fail "worker worktree not removed"
 ok "worker worktree removed"
 
+step "spawn-request: create/list/drop lifecycle"
+echo "Spawn me." > sr.md
+"$SCRIPTS/squad_assign.sh" create sr1 implementer sr.md > /dev/null
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create sr1 implementer)"
+expect "spawn-request created" "SPAWN_REQUEST_CREATED: sr1" <<<"$OUT"
+REQ=.swarmforge/squad/spawn-requests/sr1.edn
+[ -f "$REQ" ] || fail "spawn-request record not written"
+grep -q ':assignment "sr1"' "$REQ" || fail "record missing :assignment"
+grep -q ':template "implementer"' "$REQ" || fail "record missing :template"
+grep -q ':requested-at' "$REQ" || fail "record missing :requested-at"
+ok "record carries assignment/template/requested-at"
+OUT="$("$SCRIPTS/squad_spawn_request.sh" list)"
+expect "list shows the request" "sr1 implementer" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_spawn_request.sh" drop sr1)"
+expect "spawn-request dropped" "SPAWN_REQUEST_DROPPED: sr1" <<<"$OUT"
+[ ! -e "$REQ" ] || fail "dropped record still on disk"
+ok "dropped record deleted"
+grep -q ' sr1 spawn-requested template=implementer' "$LOG" || { cat "$LOG"; fail "create not logged"; }
+grep -q ' sr1 spawn-request-dropped' "$LOG" || { cat "$LOG"; fail "drop not logged"; }
+ok "spawn-request create/drop logged to events.log"
+
+step "spawn-request: refusals are agent-legible"
+"$SCRIPTS/squad_spawn_request.sh" create sr1 implementer > /dev/null
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create sr1 implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "duplicate spawn-request should exit 2, got $STATUS"
+expect "duplicate token" "SPAWN_REQUEST_EXISTS: sr1" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create ghost implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "missing assignment should exit 2, got $STATUS"
+expect "missing assignment token" "NO_SUCH_ASSIGNMENT: ghost" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create a1 implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "non-created assignment should exit 2, got $STATUS"
+expect "non-created token" "ASSIGNMENT_NOT_CREATED" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create '../evil' implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "hostile id should exit 2, got $STATUS"
+expect "hostile id rejected before path resolution" "INVALID_ASSIGNMENT_ID" <<<"$OUT"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" drop ghost 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "dropping a missing request should exit 1, got $STATUS"
+expect "missing request token" "NO_SUCH_SPAWN_REQUEST: ghost" <<<"$OUT"
+"$SCRIPTS/squad_spawn_request.sh" drop sr1 > /dev/null
+rm -f sr.md
+
+step "advisor: empty state is an empty report, exit 0"
+ADVISOR="$WORK/advisor"
+mkdir -p "$ADVISOR/.swarmforge" "$ADVISOR/swarmforge"
+cp "$PROJECT/.swarmforge/roles.tsv" "$ADVISOR/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$ADVISOR/swarmforge/scripts"
+cd "$ADVISOR"
+synth() { # synth <assignment-id> <status-edn>
+  mkdir -p ".swarmforge/squad/assignments/$1"
+  printf '%s\n' "$2" > ".swarmforge/squad/assignments/$1/status.edn"
+}
+put_worker() { # put_worker <name> <record-edn>
+  mkdir -p .swarmforge/squad/workers
+  printf '%s\n' "$2" > ".swarmforge/squad/workers/$1.edn"
+}
+set +e
+OUT="$("$SCRIPTS/squad_next.sh")"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 0 ] || fail "advisor should exit 0 on empty state, got $STATUS"
+[ -z "$OUT" ] || { echo "$OUT"; fail "empty state should print nothing"; }
+ok "empty report exits 0 and prints nothing"
+
+step "advisor: rows 10, 1, 2 (spawn-request vs capacity)"
+synth c1 '{:id "c1" :template "implementer" :state :created}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 10: created without spawn-request" "NEXT_ACTION: needs-spawn-request" <<<"$OUT"
+expect "row 10 targets the assignment" "TARGET: c1" <<<"$OUT"
+expect "row 10 is residual" "CLASS: residual" <<<"$OUT"
+"$SCRIPTS/squad_spawn_request.sh" create c1 implementer > /dev/null
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 1: spawn when capacity available" "NEXT_ACTION: spawn" <<<"$OUT"
+expect "row 1 is mechanical" "CLASS: mechanical" <<<"$OUT"
+if grep -q 'needs-spawn-request' <<<"$OUT"; then fail "requested assignment must not re-nag row 10"; fi
+ok "spawn-request suppresses needs-spawn-request"
+printf 'max_transient_agents 0\n' > swarmforge/squad.conf
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 2: wait-capacity when exhausted" "NEXT_ACTION: wait-capacity" <<<"$OUT"
+if grep -q '^NEXT_ACTION: spawn$' <<<"$OUT"; then fail "no spawn should be advised at zero capacity"; fi
+ok "zero capacity advises no spawn"
+rm swarmforge/squad.conf
+
+step "advisor: full synthetic state fires every remaining row, in table order"
+synth c2 '{:id "c2" :template "implementer" :state :created}'
+"$SCRIPTS/squad_spawn_request.sh" create c2 implementer > /dev/null
+synth c2 '{:id "c2" :template "implementer" :state :spawned}'
+synth c3 '{:id "c3" :template "implementer" :state :result}'
+synth c4 '{:id "c4" :template "implementer" :state :accepted}'
+synth c5 '{:id "c5" :template "implementer" :state :merged}'
+put_worker w-c5 '{:name "w-c5" :template "implementer" :assignment "c5" :state :active}'
+synth c6 '{:id "c6" :template "implementer" :state :rejected}'
+put_worker w-c6 '{:name "w-c6" :template "implementer" :assignment "c6" :state :allocated}'
+synth c7 '{:id "c7" :template "implementer" :state :merge-blocked}'
+synth c8 '{:id "c8" :template "implementer" :state :merge-blocked :replaced-by "m1"}'
+synth m1 '{:id "m1" :template "merger" :state :merge-blocked :replaces "c8" :replaced-by "m2"}'
+synth m2 '{:id "m2" :template "merger" :state :merge-blocked :replaces "m1"}'
+synth c9 '{:id "c9" :template "implementer" :state :merge-blocked :replaced-by "m3"}'
+synth m3 '{:id "m3" :template "merger" :state :merge-blocked :replaces "c9"}'
+synth c10 '{:id "c10" :template "implementer" :state :created}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+SEQ="$(grep '^NEXT_ACTION: ' <<<"$OUT" | sed 's/^NEXT_ACTION: //' | tr '\n' ' ')"
+WANT="spawn drop-stale-spawn-request review merge retire-worker retire-worker route-merger route-merger escalate-to-user needs-spawn-request "
+[ "$SEQ" = "$WANT" ] || { echo "$OUT"; fail "action sequence should follow table order; got: $SEQ"; }
+ok "all rows fire in table order"
+block_of() { grep -A3 "^NEXT_ACTION: $1\$" <<<"$OUT"; }
+block_of drop-stale-spawn-request | grep -q 'TARGET: c2' || fail "row 3 should target the stale request c2"
+ok "row 3: stale spawn-request targeted"
+block_of review | grep -q 'TARGET: c3' || fail "row 4 should target c3"
+ok "row 4: result assignment offered for review"
+block_of merge | grep -q 'TARGET: c4' || fail "row 5 should target c4"
+ok "row 5: accepted assignment offered for merge"
+block_of retire-worker | grep -q 'TARGET: w-c5' || fail "row 6 should target worker w-c5"
+block_of retire-worker | grep -q 'TARGET: w-c6' || fail "row 7 should target worker w-c6"
+ok "rows 6-7: retire-worker targets worker names"
+block_of route-merger | grep -q 'TARGET: c7' || fail "row 8 should target c7 (depth 0)"
+block_of route-merger | grep -q 'TARGET: m3' || fail "row 8 should target m3 (depth 1)"
+ok "row 8: route-merger under the depth cap"
+block_of escalate-to-user | grep -q 'TARGET: m2' || fail "row 9 should target m2 (depth 2)"
+ok "row 9: escalate at the depth cap"
+block_of needs-spawn-request | grep -q 'TARGET: c10' || fail "row 10 should target c10"
+ok "row 10: created without request reminded"
+for hidden in c8 m1 c9; do
+  if grep -q "^TARGET: $hidden\$" <<<"$OUT"; then fail "replaced assignment $hidden should stay silent"; fi
+done
+ok "replaced assignments trigger no judgment rows"
+[ "$(grep -c '^NEXT_ACTION: ' <<<"$OUT")" -eq 10 ] || fail "expected 10 blocks"
+[ "$(grep -c '^CLASS: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a CLASS line"
+[ "$(grep -c '^TARGET: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a TARGET line"
+[ "$(grep -c '^REASON: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a REASON line"
+[ "$(grep -c '^$' <<<"$OUT")" -eq 9 ] || { echo "$OUT"; fail "10 blocks need exactly 9 blank separators"; }
+ok "blocks are 4 lines separated by single blank lines"
+
+step "advisor: max_merger_depth read from squad.conf"
+printf 'max_merger_depth 1\n' > swarmforge/squad.conf
+OUT="$("$SCRIPTS/squad_next.sh")"
+[ "$(grep -c '^NEXT_ACTION: escalate-to-user$' <<<"$OUT")" -eq 2 ] || { echo "$OUT"; fail "depth cap 1 should escalate both m3 and m2"; }
+[ "$(grep -c '^NEXT_ACTION: route-merger$' <<<"$OUT")" -eq 1 ] || { echo "$OUT"; fail "depth cap 1 should still route c7 (depth 0)"; }
+ok "lowered depth cap moves depth-1 merger to escalate"
+rm swarmforge/squad.conf
+
+step "advisor: class filters"
+OUT="$("$SCRIPTS/squad_next.sh" --mechanical-only)"
+if grep -q '^CLASS: residual$' <<<"$OUT"; then fail "--mechanical-only leaked a residual block"; fi
+expect "--mechanical-only keeps mechanical blocks" "CLASS: mechanical" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_next.sh" --residual-only)"
+if grep -q '^CLASS: mechanical$' <<<"$OUT"; then fail "--residual-only leaked a mechanical block"; fi
+expect "--residual-only keeps residual blocks" "CLASS: residual" <<<"$OUT"
+
+step "advisor: read-only and deterministic"
+BEFORE="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum)"
+FIRST="$("$SCRIPTS/squad_next.sh")"
+SECOND="$("$SCRIPTS/squad_next.sh")"
+"$SCRIPTS/squad_next.sh" --residual-only > /dev/null
+AFTER="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum)"
+[ "$BEFORE" = "$AFTER" ] || fail "advisor mutated file state"
+ok "state identical before and after advisor runs"
+[ "$FIRST" = "$SECOND" ] || fail "advisor output should be deterministic"
+ok "back-to-back runs are identical"
+cd "$CODER"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"

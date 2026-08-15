@@ -30,14 +30,11 @@
 
 ;; --- assignment records ---------------------------------------------------
 
-(defn assignment-dir [id] (fs/path (squad-lib/squad-dir) "assignments" id))
-(defn status-file [id] (fs/path (assignment-dir id) "status.edn"))
-
 (defn read-status [id]
-  (squad-lib/read-record (status-file id) "NO_SUCH_ASSIGNMENT" id))
+  (squad-lib/read-record (squad-lib/status-file id) "NO_SUCH_ASSIGNMENT" id))
 
 (defn write-status! [id status]
-  (squad-lib/write-record! (status-file id) status))
+  (squad-lib/write-record! (squad-lib/status-file id) status))
 
 ;; --- transitions ----------------------------------------------------------
 
@@ -52,7 +49,7 @@
    :rejected #{:result :spawned}})
 
 (defn- transition! [id new-state opts]
-  (squad-lib/transition! (merge {:file (status-file id)
+  (squad-lib/transition! (merge {:file (squad-lib/status-file id)
                                  :missing-token "NO_SUCH_ASSIGNMENT"
                                  :announce-token "ASSIGNMENT_STATE"
                                  :label "assignment"
@@ -68,12 +65,12 @@
   ([id template instructions-file replaces]
    (when-not (re-matches #"[A-Za-z0-9][A-Za-z0-9_-]*" id)
      (handoff-lib/die 2 (str "INVALID_ASSIGNMENT_ID: " id)))
-   (when (fs/exists? (assignment-dir id))
+   (when (fs/exists? (squad-lib/assignment-dir id))
      (handoff-lib/die 2 (str "ASSIGNMENT_EXISTS: " id)))
    (when-not (fs/regular-file? instructions-file)
      (handoff-lib/die 1 (str "Instructions file not found: " instructions-file)))
-   (fs/create-dirs (assignment-dir id))
-   (fs/copy instructions-file (fs/path (assignment-dir id) "assignment.md"))
+   (fs/create-dirs (squad-lib/assignment-dir id))
+   (fs/copy instructions-file (fs/path (squad-lib/assignment-dir id) "assignment.md"))
    (write-status! id (cond-> {:id id
                               :template template
                               :state :created
@@ -98,7 +95,7 @@
 (defn result! [id handoff-file]
   (when-not (fs/regular-file? handoff-file)
     (handoff-lib/die 1 (str "Handoff file not found: " handoff-file)))
-  (let [stored (fs/path (assignment-dir id) "result.handoff")]
+  (let [stored (fs/path (squad-lib/assignment-dir id) "result.handoff")]
     (transition! id :result
                  ;; replace-existing: a crashed prior attempt may have copied
                  ;; the file before the status write; the retry must succeed.
