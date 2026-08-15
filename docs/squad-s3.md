@@ -114,3 +114,19 @@ result commit is then daemon-merged like any other (depth-capped).
   launcher wiring (`swarm squad up` starts both daemons)
 - C (operator): leader prompt authority change; merger prompt + contract
 - D: live dogfood — S2 leader flow rerun under S3 rules
+
+## Post-validation notes (2026-08-15)
+
+Live S3 run (dogfood 'clear-stack') passed: leader touched only records,
+squadd spawned in 6s, merged the accepted commit to main, retired the
+worker. squadd also gracefully back-filled S2-era :accepted assignments
+to :merged on first boot.
+
+Known cosmetic: a `needs-spawn-request` residual wake can fire in the
+gap between assignment creation and its spawn-request (milliseconds);
+harmless — the leader is already mid-flow. Debounce if it ever annoys.
+
+Process lesson folded into the project-article template: quality bars
+must be written as universal gates, not role-scoped duties — a
+squad-leader judging acceptance skips bars addressed to roles that
+don't exist in squad mode.

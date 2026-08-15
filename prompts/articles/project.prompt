@@ -16,8 +16,16 @@ Edit this file for your project. Every role reads it; keep it exact.
 
 ## Quality bars
 
-- <e.g. all unit tests green before any handoff>
-- <project-specific gates for hardener/QA roles, if any>
+Universal — these gate EVERY acceptance and handoff, whoever judges
+(pack roles and the squad-leader alike). List complete commands; bars
+scoped only to a role name will be skipped by judges in other modes.
+
+- <e.g. all unit tests green: exact command>
+- <e.g. complexity/duplication tools with their bars>
+
+Role-specific additions:
+
+- <e.g. hardener: mutation testing, survivors justified>
 
 ## Notes
 

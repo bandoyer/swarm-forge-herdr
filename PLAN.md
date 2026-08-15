@@ -106,7 +106,7 @@ stale-worktree warning in `swarm switch`.
   branch guard, argv hardening) — both through findings-loop-backs
   (stale requests, events.log injection, wrong-branch merge, commit-header
   injection); operator-built leader authority downgrade + merger
-  template/contract. 156 smoke checks. Live S3 dogfood pending.
+  template/contract. 158 smoke checks. Live S3 dogfood passed 2026-08-15: leader records-only, daemon spawned/merged/retired; universal-bars fix applied.
 - [ ] S4 themes, approvals (CLI + herdr notifications), reporting
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 
