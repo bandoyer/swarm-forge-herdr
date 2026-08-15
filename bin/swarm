@@ -702,6 +702,46 @@
   (slog! "squad: retired" worker)
   (println "WORKER_RETIRED:" worker))
 
+(defn squad-report!
+  "Readable squad history: assignments with states and commits,
+  approvals, and the tail of the event timeline. With a theme id,
+  scoped to its attached assignments."
+  [theme-id]
+  (let [squad (fs/path state-dir "squad")
+        theme-assignments (when theme-id
+                            (let [status (fs/path squad "themes" theme-id "status.edn")]
+                              (when-not (fs/exists? status)
+                                (die (str "No such theme: " theme-id)))
+                              (set (:assignments (edn/read-string (slurp (str status)))))))
+        include? (fn [id] (or (nil? theme-assignments) (theme-assignments id)))]
+    (println (str "# Squad report" (when theme-id (str " — theme " theme-id))))
+    (println)
+    (println "## Assignments")
+    (doseq [dir (when (fs/exists? (fs/path squad "assignments"))
+                  (sort-by fs/file-name (fs/list-dir (fs/path squad "assignments"))))
+            :let [id (fs/file-name dir)
+                  status-file (fs/path dir "status.edn")]
+            :when (and (include? id) (fs/exists? status-file))
+            :let [{:keys [state template updated-at]} (edn/read-string (slurp (str status-file)))]]
+      (println (format "- %-24s %-14s %-12s %s" id (name state) template (or updated-at ""))))
+    (println)
+    (println "## Approvals")
+    (let [approvals-dir (fs/path squad "approvals")]
+      (if (fs/exists? approvals-dir)
+        (doseq [f (sort-by fs/file-name (fs/list-dir approvals-dir))
+                :let [{:keys [id state gate target title]} (edn/read-string (slurp (str f)))]
+                :when (include? target)]
+          (println (format "- %-16s %-9s gate=%-8s target=%-20s %s" id (name state) gate target title)))
+        (println "- none")))
+    (println)
+    (println "## Recent events")
+    (let [events (fs/path squad "events.log")]
+      (doseq [line (take-last 15 (if (fs/exists? events)
+                                   (str/split-lines (slurp (str events))) []))
+              :when (or (nil? theme-assignments)
+                        (some #(str/includes? line %) theme-assignments))]
+        (println " " line)))))
+
 (defn squad! [args]
   (let [flags (set (filter #(str/starts-with? % "--") args))
         args (vec (remove #(str/starts-with? % "--") args))
@@ -711,7 +751,11 @@
       "spawn" (squad-spawn! (second args) (nth args 2 nil) no-agent?)
       "retire" (squad-retire! (second args) (str/join " " (drop 2 args)) no-agent?)
       "status" (print (squad-script "squad_worker" "list"))
-      (die "Usage: swarm squad [up [kind] | spawn <assignment-id> <template> | retire <worker> [reason] | status]"))))
+      "approvals" (print (squad-script "squad_approval" "list"))
+      "approve" (print (apply squad-script "squad_approval" "approve" (rest args)))
+      "deny" (print (apply squad-script "squad_approval" "reject" (rest args)))
+      "report" (squad-report! (second args))
+      (die "Usage: swarm squad [up [kind] | spawn <id> <template> | retire <worker> [reason] | status | approvals | approve <id> [detail] | deny <id> <reason> | report [theme]]"))))
 
 (defn -main [args]
   (case (first args)

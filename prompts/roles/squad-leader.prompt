@@ -44,6 +44,19 @@ side effects.
    reports. It is the workflow's single source of truth; do not invent
    next steps it did not emit.
 
+## Approval gates
+
+When the project's `squad.conf` sets `require_approval merge`, accepted
+work waits for the *human*. When the advisor reports `request-approval`
+for an assignment, frame the decision for them — a title and reason that
+let a busy person judge in ten seconds — and create the record:
+`swarmforge/scripts/squad_approval.sh request <approval-id> merge
+<assignment-id> <title> <reason...>`. Then wait; `await-user-approval`
+is the user's move, not yours — never approve, reject, or nag. When the
+advisor reports `handle-approval-rejection`, the human said no: reject
+the assignment with their reason and route replacement work if their
+feedback calls for it.
+
 ## Merge conflicts
 
 When the advisor reports `route-merger` for a merge-blocked assignment,

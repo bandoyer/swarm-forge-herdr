@@ -242,6 +242,43 @@
       (log! "residual-new" (str/join " " fresh))
       (wake-leader!))))
 
+;; --- user notification (S4): one buzz per newly-pending approval ----------
+
+(def notified-file (fs/path daemon-dir "notified-approvals.edn"))
+
+(defn notify-pending-approvals!
+  "Fire `herdr notification show` exactly once per pending approval —
+  the human's buzz, distinct from leader wakes. Durable dedup so daemon
+  restarts don't re-buzz."
+  []
+  (let [approvals-dir (fs/path project-root ".swarmforge" "squad" "approvals")
+        notified (if (fs/exists? notified-file)
+                   (edn/read-string (slurp (str notified-file)))
+                   #{})
+        pending (when (fs/exists? approvals-dir)
+                  (for [f (fs/list-dir approvals-dir)
+                        :when (str/ends-with? (fs/file-name f) ".edn")
+                        :let [record (edn/read-string (slurp (str f)))]
+                        :when (and (= :pending (:state record))
+                                   (not (contains? notified (:id record))))]
+                    record))]
+    (doseq [{:keys [id title reason]} pending]
+      (let [cmd (or (System/getenv "SWARMFORGE_WAKE_CMD") "herdr")]
+        (if (= "none" cmd)
+          (log! "user-notify-skipped" id)
+          (let [{:keys [exit err]} (process/sh {:continue true}
+                                               cmd "notification" "show"
+                                               (str "Approval needed: " title)
+                                               "--body" (str reason "  ->  swarm squad approve " id))]
+            (if (zero? exit)
+              (log! "user-notified" id)
+              (log! "user-notify-failed" id (str/trim (or err "")))))))
+      (spit (str notified-file)
+            (pr-str (conj (if (fs/exists? notified-file)
+                            (edn/read-string (slurp (str notified-file)))
+                            #{})
+                          id))))))
+
 ;; --- poll loop --------------------------------------------------------------
 
 (defn should-stop? []
@@ -254,6 +291,7 @@
       (apply-block! block)
       (catch Exception e
         (log! "error" (str (:action block)) (str (:target block)) (ex-message e)))))
+  (notify-pending-approvals!)
   (check-residuals!))
 
 (defn sleep-poll! [ms]

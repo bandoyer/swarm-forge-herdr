@@ -1088,5 +1088,26 @@ wait "$SQDPID" 2>/dev/null || true
 ok "new residual action on a known target re-wakes the leader"
 cd "$CODER"
 
+step "squadd: pending approvals buzz the user exactly once"
+cd "$CODER"
+"$SCRIPTS/squad_assign.sh" create apn1 implementer sp.md >/dev/null 2>&1 || { echo n > sp2.md; "$SCRIPTS/squad_assign.sh" create apn1 implementer sp2.md >/dev/null; }
+"$SCRIPTS/squad_approval.sh" request apnr1 merge apn1 "Ship apn1" "looks good" >/dev/null
+bb "$SCRIPTS/squadd.bb" "$CODER" --once >/dev/null 2>&1
+grep -q 'user-notify-skipped apnr1' .swarmforge/squad/daemon/squadd.log || fail "pending approval not noticed"
+ok "pending approval noticed (wake-cmd none path)"
+COUNT1=$(grep -c 'user-notify-skipped apnr1' .swarmforge/squad/daemon/squadd.log)
+bb "$SCRIPTS/squadd.bb" "$CODER" --once >/dev/null 2>&1
+COUNT2=$(grep -c 'user-notify-skipped apnr1' .swarmforge/squad/daemon/squadd.log)
+[ "$COUNT1" = "$COUNT2" ] || fail "approval re-buzzed on second poll"
+ok "one buzz per approval (durable dedup)"
+
+step "squad report renders assignments, approvals, events"
+OUT="$("$TOOL_ROOT/bin/swarm" squad report)"
+expect "report lists assignment" "apn1" <<<"$OUT"
+expect "report lists approval" "apnr1" <<<"$OUT"
+expect "report has events section" "## Recent events" <<<"$OUT"
+OUT="$("$TOOL_ROOT/bin/swarm" squad approve apnr1 fine)"
+expect "CLI approve transitions the record" "approved" <<<"$OUT"
+
 echo
 echo "SMOKE PASSED ($PASS checks)"
