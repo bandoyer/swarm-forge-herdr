@@ -28,3 +28,16 @@ location are preserved so upstream role prompts run unmodified.
 - scripts at `swarmforge/scripts/` inside their worktree
 - the loop: wake-up → `ready_for_next.sh` → work → commit →
   `swarm_handoff.sh <draft>` → `done_with_current.sh`
+
+## Beyond upstream (v2)
+
+Everything above concerns protocol parity with upstream's pack branches.
+This repository then extends the design past upstream's implemented
+surface: machine-enforced role contracts (S1), a herdr-native squad with
+project-scoped agent naming (S2), the deterministic advisor + sole-git-
+owner daemon (S3), and human approval gates with CLI + notifications
+(S4). Upstream's squad branch inspired S2–S4; the contract enforcement,
+approval gating, and worker contract inheritance are original here. The
+upstream squad features deliberately not ported: module maps,
+implementation-order gating, per-story packets, web dashboard (see
+docs/squad-s4.md).

@@ -1,5 +1,8 @@
 # Squad v2 — Design
 
+> Status: complete — all four phases built and validated live 2026-08-15.
+> Phase details: [S3](squad-s3.md), [S4](squad-s4.md); history in PLAN.md.
+
 Port of upstream swarm-forge's `squad` branch to the herdr runtime. Packs
 are assembly lines of fixed peers; squad is a hub: one persistent
 **squad-leader** talks to the user, and every other worker is **transient**

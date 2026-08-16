@@ -7,7 +7,12 @@
 ;;                          missing role prompts; project/toolset kept
 ;;   swarm toolset <name>   install a quality-toolset article (dotnet, clojure)
 ;;   swarm up               start worktrees, agents, and the handoff router
-;;   swarm down             stop the router and close the swarm workspace
+;;   swarm bootstrap [role] (re)send role prompts to running agents
+;;   swarm prompt <role> <text>   send a task to a role by its short name
+;;   swarm squad <cmd>      squad mode: up | spawn | retire | status |
+;;                          approvals | approve | deny | report
+;;   swarm logs [n]         interleaved timeline of all swarm activity
+;;   swarm down             stop daemons and close the swarm workspace
 ;;   swarm status           show swarm runtime state
 ;;
 ;; swarmforge.conf format (upstream-compatible):

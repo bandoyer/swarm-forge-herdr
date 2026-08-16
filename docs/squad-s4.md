@@ -70,3 +70,12 @@ complexity only with it.
   section
 - C: live dogfood with `require_approval merge` — the user gets buzzed,
   approves from the CLI, and the merge lands only then
+
+## Post-validation notes (2026-08-15)
+
+Live run (dogfood 'sum-op') passed end to end: leader accepted after
+running all four universal quality bars, the advisor withheld the merge,
+the leader framed the approval, the daemon buzzed the user once
+(`user-notified`, durable dedup), and the merge landed ~200ms after the
+human's `swarm squad approve`. The approval record carries the leader's
+full evidence framing — a self-contained audit artifact.
