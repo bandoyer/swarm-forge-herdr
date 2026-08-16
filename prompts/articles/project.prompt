@@ -27,6 +27,12 @@ Role-specific additions:
 
 - <e.g. hardener: mutation testing, survivors justified>
 
+## Code style
+
+- <indentation, brace style, naming — and add an .editorconfig so
+  `dotnet format` (or the project's formatter) enforces it mechanically>
+- <preferred test/assertion/mocking libraries for new tests>
+
 ## Notes
 
 - <anything project-specific every role must know>
