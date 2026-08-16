@@ -3,7 +3,7 @@
  :purposes
  {:test
   {:command "dotnet test"
-   :notes "Full unit suite; green before any handoff."}
+   :notes "Full unit suite; green before any handoff. Test stack: xUnit as runner, Shouldly for assertions (value.ShouldBe(expected), Should.Throw<T>), NSubstitute for test doubles. Do not use bare Assert.* or other mocking libraries in new tests."}
 
   :coverage
   {:command "dotnet test --collect:\"XPlat Code Coverage;Format=lcov\""
