@@ -17,14 +17,30 @@ mutation, complexity, or acceptance results you did not actually produce.
 If a required check cannot run, say so and stop — an honest blocker beats
 an invented number every time.
 
-## Code left behind
+## Code left behind — the Clean Code standard
 
-Every commit you hand off should be readable by a stranger: honest names,
-straightforward control flow, no duplication introduced by your change, no
-commented-out code, no debug leftovers. Keep logic in testable modules;
-push OS, network, and UI edges behind thin adapters. Stay inside your
-role's mandate — improvements that belong to another role go down the
-chain, not into your commit.
+Code is written to be READ; the user reads every merged slice. The
+standard is Robert C. Martin's Clean Code tradition:
+
+- **Names reveal intention**: pronounceable, searchable, no
+  abbreviations; classes are nouns, methods are verbs, booleans read as
+  predicates; one word per concept across the codebase.
+- **Functions are small and do one thing** at one level of abstraction;
+  files read top-down (stepdown rule); 0–2 arguments preferred, never a
+  boolean flag argument (split the function); commands change state,
+  queries answer questions, never both.
+- **SOLID**: one reason to change per class; extend by adding new
+  handlers/strategies, not by branching inside old ones; small
+  role-shaped interfaces; dependencies point at abstractions.
+- No duplication introduced by your change, no commented-out code, no
+  debug leftovers. Boy Scout rule within your slice's scope.
+- Keep logic in testable modules; push OS, network, and UI edges behind
+  thin adapters. If a project defines a clean-code or style skill, it
+  refines these rules — read it.
+
+Stay inside your role's mandate — improvements that belong to another
+role go down the chain, not into your commit. Reviewers and cleaners:
+these rules are review criteria; a violation is a finding.
 
 ## Comments
 
