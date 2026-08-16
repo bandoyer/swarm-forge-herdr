@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# install-crap4net — pack and install crap4net as a global dotnet tool.
+# install-crap4net — install crap4net (github.com/bandoyer/crap4net) as a
+# global dotnet tool. Uses a local checkout when one exists next to this
+# repo; otherwise clones. Override the source with CRAP4NET_REPO.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$DIR/tools/crap4net/src"
+LOCAL="$(dirname "$DIR")/crap4net"
+if [ -d "$LOCAL/src" ]; then
+  SRC="$LOCAL/src"
+else
+  TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+  git clone -q --depth 1 "${CRAP4NET_REPO:-https://github.com/bandoyer/crap4net}" "$TMP/crap4net"
+  SRC="$TMP/crap4net/src"
+fi
 dotnet pack "$SRC" -c Release -o "$SRC/nupkg" --nologo -v q
 dotnet tool update --global crap4net --add-source "$SRC/nupkg" --no-cache
 echo "Installed: $(crap4net --help 2>/dev/null | head -1 || echo 'restart your shell so ~/.dotnet/tools is on PATH')"

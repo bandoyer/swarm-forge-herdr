@@ -109,8 +109,9 @@ approval gates.
   here the tool table binds abstract purposes (`mutation`, `coverage`,
   `crap`, `dry`, `boundaries`, `acceptance`) to per-language profiles:
   `clojure` (upstream's own tools) and `dotnet` (Stryker.NET, coverlet,
-  jscpd, NetArchTest, Reqnroll, and [crap4net](tools/crap4net) — built
-  here: per-method CRAP scores from Roslyn + lcov).
+  jscpd, NetArchTest, Reqnroll, and [crap4net](https://github.com/bandoyer/crap4net) — built
+  for this project, now its own repo: per-method CRAP scores from
+  Roslyn + lcov).
 - **Observability** — `swarm logs` interleaves the launcher, both
   daemons, the squad event log, and every handoff's lifecycle headers
   into one timeline; agent transcripts and git history carry the rest.

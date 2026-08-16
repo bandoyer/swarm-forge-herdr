@@ -16,7 +16,7 @@
 
   :crap
   {:command "crap4net --lcov <coverage.info> <source-dir>"
-   :install "bin/install-crap4net (from the swarm-forge-herdr checkout)"
+   :install "bin/install-crap4net (fetches github.com/bandoyer/crap4net)"
    :notes "CRAP = complexity^2 x (1-coverage)^3 + complexity, computed per method from source + lcov. Bar: every method <= 6 (exit 2 lists offenders). Requires fresh coverage first."}
 
   :dry

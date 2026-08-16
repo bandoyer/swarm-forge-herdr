@@ -66,7 +66,7 @@ Acceptance-Pipeline-Specification, dependency-checker}, generate `bb` shims
 | dry | jscpd | adopt (JetBrains dupFinder is deprecated) |
 | boundaries | NetArchTest.Rules arch-test project | adopt |
 | acceptance | Reqnroll (NOT SpecFlow — discontinued) | adopt |
-| crap | **crap4net** | **build**: Roslyn code metrics + lcov → CRAP = c²(1−cov)³+c, gate ≤ 6. Candidate standalone repo. |
+| crap | **crap4net** | **build**: Roslyn code metrics + lcov → CRAP = c²(1−cov)³+c, gate ≤ 6. Split to github.com/bandoyer/crap4net 2026-08-15. |
 | gherkin mutation | upstream APS `gherkin-mutator` + NDJSON worker driving Reqnroll | defer to v2 |
 
 ## Phase 4 — Validation (dogfood) ✅
