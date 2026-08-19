@@ -9,9 +9,17 @@ Edit this file for your project. Every role reads it; keep it exact.
 
 ## Commands
 
-- Unit tests: <e.g. dotnet test>
+These slots are split by *cost*, and roles depend on the split. `Unit
+tests` is what every role runs between steps and before every handoff,
+so it must be fast: if it needs Docker, containers, a browser, or a live
+service, it belongs under `Acceptance suite` instead. Bundling them is
+expensive and silent — every "keep the suite green" step in the
+constitution starts paying end-to-end prices, and mutation testing,
+which re-runs the suite once per mutant, stops being feasible at all.
+
+- Unit tests: <fast command — no containers, browsers, live services>
 - Coverage: <command, and where the report lands>
-- Acceptance suite: <command, or "none yet">
+- Acceptance suite: <slow/end-to-end command, or "none yet">
 - Lint/format: <command, or "none">
 
 ## Quality bars
@@ -19,6 +27,8 @@ Edit this file for your project. Every role reads it; keep it exact.
 Universal — these gate EVERY acceptance and handoff, whoever judges
 (pack roles and the squad-leader alike). List complete commands; bars
 scoped only to a role name will be skipped by judges in other modes.
+Because they gate every handoff, universal bars name the fast commands;
+an end-to-end suite belongs in a role-specific bar instead.
 
 - <e.g. all unit tests green: exact command>
 - <e.g. complexity/duplication tools with their bars>
