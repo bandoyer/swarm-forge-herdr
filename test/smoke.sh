@@ -22,6 +22,61 @@ expect() { # expect <label> <needle> <<< haystack
   ok "$1"
 }
 
+step "installed prompts match their sources"
+# This repo dogfoods itself, so swarmforge/ holds installed copies of the
+# stock prompts. Drift there means a fix landed in prompts/ and never
+# reached the swarm actually running on it. Two categories are excluded
+# deliberately: project.prompt is written per project, and contracts carry
+# project-specific artifact roots and evidence patterns. pack.prompt is a
+# copy of whichever pack is installed, so it is matched against the set.
+same_as_source() { # same_as_source <installed-rel> <source-rel>
+  if [ ! -f "$TOOL_ROOT/$2" ]; then
+    ok "$1 has no stock source (project-authored)"
+    return
+  fi
+  diff -q "$TOOL_ROOT/$1" "$TOOL_ROOT/$2" >/dev/null 2>&1 || {
+    diff -u "$TOOL_ROOT/$2" "$TOOL_ROOT/$1" >&2 || true
+    fail "$1 drifted from $2 — edit prompts/ as source, then sync both"
+  }
+  ok "$1 matches $2"
+}
+same_as_source swarmforge/constitution.prompt prompts/constitution.prompt
+same_as_source swarmforge/worker-common.prompt prompts/worker-common.prompt
+for a in engineering handoffs workflow; do
+  same_as_source "swarmforge/constitution/articles/$a.prompt" \
+                 "prompts/articles/$a.prompt"
+done
+for r in "$TOOL_ROOT"/swarmforge/roles/*.prompt; do
+  n="$(basename "$r")"
+  same_as_source "swarmforge/roles/$n" "prompts/roles/$n"
+done
+PACK_OK=0
+for p in "$TOOL_ROOT"/packs/*.prompt; do
+  diff -q "$TOOL_ROOT/swarmforge/constitution/articles/pack.prompt" "$p" \
+    >/dev/null 2>&1 && PACK_OK=1
+done
+[ "$PACK_OK" -eq 1 ] || fail "installed pack.prompt matches no packs/*.prompt"
+ok "installed pack.prompt matches a pack article"
+
+# A new kind of installed file must be classified, not silently ignored:
+# either it is compared above or it is a documented per-project file.
+while read -r rel; do
+  case "$rel" in
+    constitution.prompt|worker-common.prompt|roles/*.prompt) continue ;;
+    constitution/articles/engineering.prompt) continue ;;
+    constitution/articles/handoffs.prompt) continue ;;
+    constitution/articles/workflow.prompt) continue ;;
+    constitution/articles/pack.prompt) continue ;;
+    constitution/articles/project.prompt) continue ;;  # per project
+    constitution/articles/toolset.prompt) continue ;;  # generated
+    contracts/*.contract.edn) continue ;;              # per project
+    swarmforge.conf) continue ;;                       # per project
+  esac
+  fail "unclassified installed file swarmforge/$rel — compare it or document it"
+done < <(cd "$TOOL_ROOT/swarmforge" && find . -type f -not -path './scripts/*' \
+           | sed 's|^\./||' | sort)
+ok "every installed file is compared or documented"
+
 step "set up throwaway project"
 PROJECT="$WORK/project"
 mkdir -p "$PROJECT"
