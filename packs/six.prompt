@@ -21,3 +21,9 @@ routes back to specifier and the chain runs again.
   work. Only a passing verification ends the slice: qa then sends the
   completion git_handoff to specifier,coder,cleaner,architect,hardener,
   and that broadcast is TERMINAL — each recipient merges it and stops.
+- Routing back is bounded: at most two findings per task name. When a
+  third verification of the same task fails, qa stops and puts the
+  situation to the user instead of sending the slice round again. Six
+  roles per iteration, one of them a mutation pass, is too expensive to
+  loop unattended, and a task that fails verification three times is a
+  specification problem rather than a fix-it-again problem.

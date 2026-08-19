@@ -36,9 +36,12 @@ A `git_handoff` payload contains `merge_and_process <sender> <commit>`:
    role changed nothing of substance. A formatting-only or audit-only pass
    still gets forwarded; the chain must never silently stall.
 
-The one exception is the chain's terminal broadcast: when the pack article
-marks a handoff as terminal for your role, merge the commit and stop. Do
-not re-forward a terminal handoff.
+Two exceptions, both defined by the pack article. The chain's terminal
+broadcast: when the article marks a handoff as terminal for your role,
+merge the commit and stop, and do not re-forward it. And a bound on your
+role's routing: where the article caps how many times you may send work
+back, exhausting that cap means stopping and putting the situation to
+the user — not forwarding anyway to keep things moving.
 
 ## When blocked
 
