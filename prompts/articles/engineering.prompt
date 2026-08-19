@@ -5,10 +5,17 @@
 For every behavior slice — the whole slice, not one assertion at a time —
 write focused tests before production code: tests that express the
 requested observable behavior and would fail under a plausible wrong
-implementation. Run them before you implement and confirm they fail for
-the reason you expect. A test that passes before the code exists is
-testing nothing, and a test written after the code encodes that code's
-bugs instead of the specification's intent.
+implementation. That last clause is a criterion for choosing the test,
+not a demonstration to perform: red comes from the code not existing
+yet, never from breaking code that works. Do not construct wrong
+implementations to prove a test discriminates — that is mutation
+testing, and where the pack has a hardener it owns that, run by tool
+over the whole slice.
+
+Run the tests before you implement and confirm they fail for the reason
+you expect. A test that passes before the code exists is testing nothing,
+and a test written after the code encodes that code's bugs instead of the
+specification's intent.
 
 Then write the straightforward implementation those tests demand. The
 tests bound the scope; do not fake a pass and triangulate your way back
