@@ -2,9 +2,18 @@
 
 ## Test-first
 
-For every behavior slice, write focused tests before production code —
-tests that express the requested observable behavior and would fail under a
-plausible wrong implementation. Then write the minimum code that passes.
+For every behavior slice — the whole slice, not one assertion at a time —
+write focused tests before production code: tests that express the
+requested observable behavior and would fail under a plausible wrong
+implementation. Run them before you implement and confirm they fail for
+the reason you expect. A test that passes before the code exists is
+testing nothing, and a test written after the code encodes that code's
+bugs instead of the specification's intent.
+
+Then write the straightforward implementation those tests demand. The
+tests bound the scope; do not fake a pass and triangulate your way back
+to a real design.
+
 Never hand off work whose tests fail, and never weaken or delete a test to
 get to green; if a test is wrong, fixing it is part of the task and belongs
 in the commit message.
@@ -59,9 +68,19 @@ edit: when you change code, its comments are part of the change.
 Small and coherent: one slice of work per commit. Subjects are plain,
 succinct, and written for a human skimming history — say what changed,
 nothing else: `Add cave exit routing`. No role prefixes or tags (the
-swarm's audit trail already records who did what), and no trailers or
-attribution footers (no Co-Authored-By, Generated-By, or similar); the
-subject and body say everything. Evidence and reasoning go in the body.
+swarm's audit trail already records who did what); the subject and body
+say everything. Evidence and reasoning go in the body.
+
+Attribution: if the project installs a commit hook that appends a
+`Co-Authored-By:` trailer (check `git config core.hooksPath`), do NOT
+write one by hand. Such hooks skip when a trailer is already present, so
+a hand-written line replaces a measured attribution with the model's own
+self-report, which is a claim rather than a measurement. Where there is
+no such hook and the project wants attribution, end with exactly one
+`Co-Authored-By:` naming the model that wrote the commit. Either way it
+is the only trailer: no Generated-By, no role tags. Projects that want
+no attribution at all say so in the project article.
+
 Commit only to your own worktree's branch; integration happens through
 handoffs, never through pushing to another role's branch.
 

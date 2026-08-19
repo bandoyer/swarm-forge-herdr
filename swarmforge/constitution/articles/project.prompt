@@ -36,5 +36,8 @@ doubly: broken runtime code breaks future swarms, including this one.
 
 ## Notes
 
+- Commit attribution: none. This project wants no `Co-Authored-By:` and
+  no other trailer or footer on commits — there is no attribution hook
+  installed, and the swarm's own audit trail already records authorship.
 - Do not edit `.swarmforge/` runtime state or restart daemons; the human
   operator owns the running swarm.

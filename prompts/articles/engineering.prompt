@@ -2,9 +2,18 @@
 
 ## Test-first
 
-For every behavior slice, write focused tests before production code —
-tests that express the requested observable behavior and would fail under a
-plausible wrong implementation. Then write the minimum code that passes.
+For every behavior slice — the whole slice, not one assertion at a time —
+write focused tests before production code: tests that express the
+requested observable behavior and would fail under a plausible wrong
+implementation. Run them before you implement and confirm they fail for
+the reason you expect. A test that passes before the code exists is
+testing nothing, and a test written after the code encodes that code's
+bugs instead of the specification's intent.
+
+Then write the straightforward implementation those tests demand. The
+tests bound the scope; do not fake a pass and triangulate your way back
+to a real design.
+
 Never hand off work whose tests fail, and never weaken or delete a test to
 get to green; if a test is wrong, fixing it is part of the task and belongs
 in the commit message.
