@@ -2,8 +2,9 @@
 
 Roles: specifier, coder, cleaner, architect, hardener, qa.
 
-Chain: specifier -> coder -> cleaner -> architect -> hardener -> qa,
-then qa broadcasts completion to every other role.
+Chain: specifier -> coder -> cleaner -> architect -> hardener -> qa.
+A passing qa broadcasts completion to every other role; a qa finding
+routes back to specifier and the chain runs again.
 
 - specifier turns a request into an accepted specification, then sends a
   git_handoff to coder.
@@ -13,6 +14,10 @@ then qa broadcasts completion to every other role.
 - hardener produces quality evidence (coverage, mutation, complexity,
   duplication) and fixes what fails the bars, then forwards to qa.
 - qa runs the acceptance and unit suites and verifies the slice against
-  its specification, then sends the completion git_handoff to
-  specifier,coder,cleaner,architect,hardener. That broadcast is TERMINAL:
-  each recipient merges it and stops.
+  its specification. A substantive finding — delivered behavior that
+  contradicts the specification, or specified behavior with no test —
+  goes back to specifier as a git_handoff carrying the qa commit; that
+  handoff continues the chain, and specifier slices the finding into new
+  work. Only a passing verification ends the slice: qa then sends the
+  completion git_handoff to specifier,coder,cleaner,architect,hardener,
+  and that broadcast is TERMINAL — each recipient merges it and stops.
