@@ -1,9 +1,9 @@
 # Article: Pack (six)
 
-Roles: specifier, coder, cleaner, architect, hardener, QA.
+Roles: specifier, coder, cleaner, architect, hardener, qa.
 
-Chain: specifier -> coder -> cleaner -> architect -> hardener -> QA,
-then QA broadcasts completion to every other role.
+Chain: specifier -> coder -> cleaner -> architect -> hardener -> qa,
+then qa broadcasts completion to every other role.
 
 - specifier turns a request into an accepted specification, then sends a
   git_handoff to coder.
@@ -11,8 +11,8 @@ then QA broadcasts completion to every other role.
 - cleaner cleans the implementation, then forwards to architect.
 - architect reviews structure and boundaries, then forwards to hardener.
 - hardener produces quality evidence (coverage, mutation, complexity,
-  duplication) and fixes what fails the bars, then forwards to QA.
-- QA runs the acceptance and unit suites and verifies the slice against
+  duplication) and fixes what fails the bars, then forwards to qa.
+- qa runs the acceptance and unit suites and verifies the slice against
   its specification, then sends the completion git_handoff to
   specifier,coder,cleaner,architect,hardener. That broadcast is TERMINAL:
   each recipient merges it and stops.

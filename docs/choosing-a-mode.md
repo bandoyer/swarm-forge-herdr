@@ -46,10 +46,10 @@ discipline of specification without heavyweight verification tooling.
 
 Cost: 4 agents, ~4 handoffs per slice.
 
-### six-pack — specifier → coder → cleaner → architect → hardener → QA
+### six-pack — specifier → coder → cleaner → architect → hardener → qa
 *The evidence regime.* Everything four-pack does, plus a hardener that
 must produce coverage/complexity/mutation receipts (kill the mutants or
-justify each survivor, in writing) and a QA that verifies delivered
+justify each survivor, in writing) and a qa that verifies delivered
 behavior against the specification, not the diff.
 
 Use when: correctness is the product; regressions are expensive; the

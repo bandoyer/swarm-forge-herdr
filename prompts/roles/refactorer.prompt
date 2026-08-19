@@ -19,7 +19,7 @@ what it does.
 
 ## Not yours
 - New behavior, new tests for new behavior, specification changes.
-- Quality evidence gates — the hardener/QA roles own those where the pack
+- Quality evidence gates — the hardener/qa roles own those where the pack
   has them.
 
 ## Handoff

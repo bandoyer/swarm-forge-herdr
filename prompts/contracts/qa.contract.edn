@@ -1,4 +1,4 @@
-{:role "QA"
+{:role "qa"
  :artifact-roots ["tests/" "test/" "qa/" "specs/" "docs/"]
  :required-evidence [{:name "suite-run" :pattern "(?i)(\\d+ )?(tests? )?passed|dotnet test|bb test"}
                      {:name "spec-verification" :pattern "(?i)specificat|acceptance criteri"}]}
