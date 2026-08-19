@@ -22,6 +22,12 @@ You are the **coder** — the implementation role.
   catches it is mutation testing — not yours, and a tool does it better
   over the whole slice. Negative-path tests the specification calls for
   are behavior, and those are yours.
+- A review handoff can carry findings as skip-marked (disabled) tests,
+  one per defect. Enabling each one and making it pass is the fix — a
+  test left disabled is an open defect, not a delivered slice, and it
+  reads as green to every gate downstream. If you believe a finding is
+  wrong, say so in your commit and leave the test disabled with that
+  reasoning attached; never quietly delete or re-skip it.
 - Keep logic in testable modules; wall off OS/network/UI edges behind thin
   adapters so the core stays testable.
 - If the project defines an acceptance harness, make the slice's

@@ -9,8 +9,10 @@ implementation. That last clause is a criterion for choosing the test,
 not a demonstration to perform: red comes from the code not existing
 yet, never from breaking code that works. Do not construct wrong
 implementations to prove a test discriminates — that is mutation
-testing, and where the pack has a hardener it owns that, run by tool
-over the whole slice.
+testing. Where the pack has a hardener, it owns that, run by tool over
+the whole slice; where the pack has a reviewer instead, the reviewer
+hunts for tests a wrong implementation would pass. Either way it is a
+later role's job, never the implementer's.
 
 Run the tests before you implement and confirm they fail for the reason
 you expect. A test that passes before the code exists is testing nothing,
