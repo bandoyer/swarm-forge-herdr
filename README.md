@@ -39,6 +39,14 @@ swarm prompt coder "Task 'first-slice': ..."
 swarm logs                 # one interleaved timeline of everything
 ```
 
+For a human gate before integration, use
+`swarm switch adversaries-codex-review`. Its coder and reviewer operate
+entirely in linked worktrees. The clean terminal result stays on
+`swarmforge-candidate` until the operator verifies it and a human approves
+moving it to the protected branch. The launcher also refuses any pack that
+places its coder in the project root while that root is on `main` or
+`master`.
+
 Unsure which pack? See [docs/choosing-a-mode.md](docs/choosing-a-mode.md):
 two-pack work ends up *tidy*, adversaries *attacked*, four-pack
 *specified*, six-pack *proven*.

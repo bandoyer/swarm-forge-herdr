@@ -85,6 +85,38 @@ git -C "$PROJECT" -c user.email=smoke@test -c user.name=smoke \
   commit -q --allow-empty -m "initial"
 COMMIT="$(git -C "$PROJECT" rev-parse --short=10 HEAD)"
 
+step "launcher protects main from a project-root coder"
+PROTECTED="$WORK/protected"
+mkdir -p "$PROTECTED/swarmforge"
+git -C "$PROTECTED" init -qb main
+git -C "$PROTECTED" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+printf 'window coder codex master task\n' > "$PROTECTED/swarmforge/swarmforge.conf"
+set +e
+OUT="$(cd "$PROTECTED" && "$TOOL_ROOT/bin/swarm" up 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "protected-branch launch should exit 1, got $STATUS"
+expect "protected branch: launch rejected" \
+  "Refusing to start coder in the project root on protected branch 'main'." <<<"$OUT"
+[ ! -d "$PROTECTED/.worktrees" ] || fail "rejected launch should create no worktrees"
+ok "protected branch rejection happens before worktree creation"
+
+step "review-gated Codex pack isolates both roles"
+REVIEW_PACK="$WORK/review-pack"
+mkdir -p "$REVIEW_PACK"
+git -C "$REVIEW_PACK" init -qb main
+git -C "$REVIEW_PACK" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$REVIEW_PACK" && "$TOOL_ROOT/bin/swarm" init adversaries-codex-review >/dev/null)
+grep -q '^window coder codex candidate task ' \
+  "$REVIEW_PACK/swarmforge/swarmforge.conf" \
+  || fail "review-gated coder should use the candidate worktree"
+grep -q '^window reviewer codex reviewer task ' \
+  "$REVIEW_PACK/swarmforge/swarmforge.conf" \
+  || fail "review-gated reviewer should use the reviewer worktree"
+ok "review-gated pack keeps coder and reviewer out of the project root"
+
 CODER="$PROJECT"
 CLEANER="$WORK/cleaner"
 mkdir -p "$CLEANER"

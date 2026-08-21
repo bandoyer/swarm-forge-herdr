@@ -33,6 +33,8 @@
 (def conf-file (fs/path project-root "swarmforge" "swarmforge.conf"))
 (def worktrees-dir (fs/path project-root ".worktrees"))
 (def receive-modes #{"task" "batch"})
+(def protected-branches #{"main" "master"})
+(def project-root-worktrees #{"master" "none"})
 
 (defn slog!
   "Append a timestamped line to the swarm's own log so launcher actions
@@ -108,13 +110,13 @@
                :agent-name agent-name
                :agent-kind agent-kind
                :worktree-name worktree
-               :worktree-path (if (#{"master" "none"} worktree)
+               :worktree-path (if (project-root-worktrees worktree)
                                 (str project-root)
                                 (str (fs/path worktrees-dir worktree)))
                :receive-mode mode
                :extra-args (vec extra)})))]
     (doseq [[value rows'] [[:role rows] [:agent-name rows]
-                           [:worktree-name (remove #(#{"master" "none"} (:worktree-name %)) rows)]]
+                           [:worktree-name (remove #(project-root-worktrees (:worktree-name %)) rows)]]
             [duplicate n] (frequencies (map value rows'))
             :when (> n 1)]
       (die (format "Duplicate %s '%s' in swarmforge.conf" (name value) duplicate)))
@@ -131,11 +133,24 @@
 
 (defn ensure-worktrees! [rows]
   (doseq [{:keys [worktree-name worktree-path]} rows
-          :when (not (#{"master" "none"} worktree-name))
+          :when (not (project-root-worktrees worktree-name))
           :when (not (fs/exists? (fs/path worktree-path ".git")))]
     (println "Creating worktree" worktree-path)
     (sh-ok "git" "-C" (str project-root) "worktree" "add" "--force"
            "-B" (str "swarmforge-" worktree-name) worktree-path "HEAD")))
+
+(defn ensure-coder-is-off-protected-branch! [rows]
+  (let [has-root-coder? (some #(and (= "coder" (str/lower-case (:role %)))
+                                    (project-root-worktrees (:worktree-name %)))
+                              rows)
+        branch (when has-root-coder?
+                 (str/trim (sh-ok "git" "-C" (str project-root)
+                                  "branch" "--show-current")))]
+    (when (protected-branches branch)
+      (die (str "Refusing to start coder in the project root on protected branch '"
+                branch "'.")
+           "Use an isolated coder worktree, such as the adversaries-codex-review pack,"
+           "or switch the project root to a review/<task> branch first."))))
 
 (defn sync-scripts! [rows]
   (doseq [path (distinct (map :worktree-path rows))
@@ -435,6 +450,7 @@
   (when-not (fs/exists? (fs/path project-root ".git"))
     (die "Run swarm from the root of a git repository."))
   (let [rows (parse-conf)]
+    (ensure-coder-is-off-protected-branch! rows)
     (ensure-gitignore!)
     (ensure-worktrees! rows)
     (ensure-queue-dirs! rows)

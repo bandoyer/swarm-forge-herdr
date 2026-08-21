@@ -57,10 +57,13 @@ pin `cd` explicitly (session cwd resets) and accept states idle OR done.
 
 ## Development workflow (this repo builds itself)
 
-- Swarm-built slices: adversaries pack in THIS repo (`swarm up`, task to
-  coder, reviewer attacks; findings ride as gated tests). Operator acts
-  as integrator: independently re-verify every claim (rerun smoke, probe
-  the feature), then push.
+- Swarm-built slices: adversaries pack in THIS repo (task to coder,
+  reviewer attacks; findings ride as gated tests). Start a project-root
+  coder only from a `review/<task>` branch, or use a review-gated preset
+  whose coder has a linked worktree. The launcher refuses a project-root
+  coder on `main` or `master`. Operator acts as integrator: independently
+  re-verify every claim (rerun smoke, probe the feature), obtain the human
+  approval the project requires, then integrate and push.
 - Design-first: substantial features get a docs/ design before code.
 - Test env escapes: `SWARMFORGE_WAKE_CMD=none`, `SWARMFORGE_NO_AGENT=1`,
   `SWARM_BIN=<path>`, `--once` on both daemons.
