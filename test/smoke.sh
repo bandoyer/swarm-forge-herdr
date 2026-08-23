@@ -117,6 +117,40 @@ grep -q '^window reviewer codex reviewer task ' \
   || fail "review-gated reviewer should use the reviewer worktree"
 ok "review-gated pack keeps coder and reviewer out of the project root"
 
+step "all-models six-pack pins benchmark-selected roles"
+ALL_MODELS_PACK="$WORK/all-models-pack"
+mkdir -p "$ALL_MODELS_PACK"
+git -C "$ALL_MODELS_PACK" init -qb main
+git -C "$ALL_MODELS_PACK" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$ALL_MODELS_PACK" && \
+  "$TOOL_ROOT/bin/swarm" init six-all-models-review >/dev/null && \
+  "$TOOL_ROOT/bin/swarm" switch six-codex-review >/dev/null && \
+  "$TOOL_ROOT/bin/swarm" switch six-all-models-review >/dev/null)
+ALL_MODELS_CONF="$ALL_MODELS_PACK/swarmforge/swarmforge.conf"
+grep -q '^window specifier claude all-specifier task --model claude-opus-5 --effort xhigh$' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models specifier should pin Opus 5 xHigh"
+grep -q '^window coder codex all-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models coder should pin Sol High"
+grep -q '^window cleaner claude all-cleaner batch --model claude-opus-5 --effort high$' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models cleaner should pin Opus 5 High"
+grep -q '^window architect claude all-architect batch --model claude-opus-5 --effort xhigh$' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models architect should pin Opus 5 xHigh"
+grep -q '^window hardener grok all-hardener batch --model grok-4.6 --reasoning-effort high ' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models hardener should pin Grok 4.6 High"
+grep -q '^window qa codex all-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
+  "$ALL_MODELS_CONF" \
+  || fail "all-models qa should pin Sol xHigh"
+grep -q 'Only the operator' \
+  "$ALL_MODELS_PACK/swarmforge/constitution/articles/pack.prompt" \
+  || fail "all-models pack should retain the human integration gate"
+ok "all-models six-pack is invokable with pinned isolated roles"
+
 CODER="$PROJECT"
 CLEANER="$WORK/cleaner"
 mkdir -p "$CLEANER"

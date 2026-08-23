@@ -32,6 +32,8 @@ The bundled presets select their agent CLI explicitly:
 - Codex presets are provided for adversaries and isolated six-role runs.
 - One experimental six-role preset uses Grok for the coder and Codex for the
   other roles.
+- `six-all-models-review` assigns benchmark-selected roles across Claude,
+  Codex, and Grok, with every worker isolated behind human integration.
 - Any pack's `swarmforge.conf` can be edited after initialization to use an
   agent kind supported by Herdr.
 - Squad leaders accept an optional agent kind, but transient squad workers
@@ -154,12 +156,24 @@ branches intact for inspection.
 | `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Claude; specifier uses root, later roles are isolated |
 | `six-codex-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Codex; terminal result requires human integration |
 | `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Grok coder, Codex otherwise; human integration |
+| `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |
 
 For `two`, ordinary adversaries presets, and any other configuration whose
 coder worktree is `master` or `none`, work on a `review/...` branch. The
 `adversaries-codex-review` preset keeps both agents out of the project root and
 is the simplest preset when a human must approve the candidate before it
 touches the protected branch.
+
+Use the mixed-provider evidence pipeline with:
+
+```sh
+swarm init six-all-models-review    # new swarm project
+swarm switch six-all-models-review  # existing swarm project
+```
+
+It assigns Opus 5 xHigh to specification and architecture, Sol High to coding,
+Opus 5 High to cleaning, Grok 4.6 High to hardening, and Sol xHigh to QA. Every
+role is isolated, and the terminal candidate still requires human integration.
 
 See [Choosing a mode](docs/choosing-a-mode.md) for the evidence and cost
 tradeoffs: two-pack work ends up *tidy*, adversaries work *attacked*, four-pack
