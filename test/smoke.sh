@@ -151,6 +151,42 @@ grep -q 'Only the operator' \
   || fail "all-models pack should retain the human integration gate"
 ok "all-models six-pack is invokable with pinned isolated roles"
 
+step "Claude and Codex six-pack pins benchmark-informed roles"
+CLAUDE_CODEX_PACK="$WORK/claude-codex-pack"
+mkdir -p "$CLAUDE_CODEX_PACK"
+git -C "$CLAUDE_CODEX_PACK" init -qb main
+git -C "$CLAUDE_CODEX_PACK" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$CLAUDE_CODEX_PACK" && \
+  "$TOOL_ROOT/bin/swarm" init six-claude-codex-review >/dev/null && \
+  "$TOOL_ROOT/bin/swarm" switch six-codex-review >/dev/null && \
+  "$TOOL_ROOT/bin/swarm" switch six-claude-codex-review >/dev/null)
+CLAUDE_CODEX_CONF="$CLAUDE_CODEX_PACK/swarmforge/swarmforge.conf"
+grep -q '^window specifier claude cc-specifier task --model claude-opus-5 --effort xhigh$' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex specifier should pin Opus 5 xHigh"
+grep -q '^window coder codex cc-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex coder should pin Sol High"
+grep -q '^window cleaner claude cc-cleaner batch --model claude-opus-5 --effort high$' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex cleaner should pin Opus 5 High"
+grep -q '^window architect claude cc-architect batch --model claude-opus-5 --effort xhigh$' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex architect should pin Opus 5 xHigh"
+grep -q '^window hardener claude cc-hardener batch --model claude-opus-5 --effort xhigh$' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex hardener should pin Opus 5 xHigh"
+grep -q '^window qa codex cc-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
+  "$CLAUDE_CODEX_CONF" \
+  || fail "Claude-Codex QA should pin Sol xHigh"
+CLAUDE_CODEX_PROMPT="$CLAUDE_CODEX_PACK/swarmforge/constitution/articles/pack.prompt"
+grep -q 'output or security probe' "$CLAUDE_CODEX_PROMPT" \
+  || fail "Claude-Codex pack should require executable output and security probes"
+grep -q 'Only the operator' "$CLAUDE_CODEX_PROMPT" \
+  || fail "Claude-Codex pack should retain the human integration gate"
+ok "Claude and Codex six-pack is invokable with pinned isolated roles"
+
 CODER="$PROJECT"
 CLEANER="$WORK/cleaner"
 mkdir -p "$CLEANER"

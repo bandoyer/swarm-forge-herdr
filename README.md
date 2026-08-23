@@ -34,6 +34,8 @@ The bundled presets select their agent CLI explicitly:
   other roles.
 - `six-all-models-review` assigns benchmark-selected roles across Claude,
   Codex, and Grok, with every worker isolated behind human integration.
+- `six-claude-codex-review` uses the benchmark-selected Claude and Codex
+  assignments when a two-provider six-pack is preferred.
 - Any pack's `swarmforge.conf` can be edited after initialization to use an
   agent kind supported by Herdr.
 - Squad leaders accept an optional agent kind, but transient squad workers
@@ -157,6 +159,7 @@ branches intact for inspection.
 | `six-codex-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Codex; terminal result requires human integration |
 | `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Grok coder, Codex otherwise; human integration |
 | `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |
+| `six-claude-codex-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-informed Opus and Sol roles; human integration |
 
 For `two`, ordinary adversaries presets, and any other configuration whose
 coder worktree is `master` or `none`, work on a `review/...` branch. The
@@ -174,6 +177,18 @@ swarm switch six-all-models-review  # existing swarm project
 It assigns Opus 5 xHigh to specification and architecture, Sol High to coding,
 Opus 5 High to cleaning, Grok 4.6 High to hardening, and Sol xHigh to QA. Every
 role is isolated, and the terminal candidate still requires human integration.
+
+Use the Claude-and-Codex evidence pipeline with:
+
+```sh
+swarm init six-claude-codex-review    # new swarm project
+swarm switch six-claude-codex-review  # existing swarm project
+```
+
+It assigns Opus 5 xHigh to specification, architecture, and hardening; Sol
+High to coding; Opus 5 High to cleaning; and Sol xHigh to QA. Hardener and QA
+must execute every project-declared output or security probe. Every role is
+isolated, and the terminal candidate still requires human integration.
 
 See [Choosing a mode](docs/choosing-a-mode.md) for the evidence and cost
 tradeoffs: two-pack work ends up *tidy*, adversaries work *attacked*, four-pack
