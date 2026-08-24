@@ -9,6 +9,7 @@ set -euo pipefail
 
 TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$(mktemp -d)"
+if command -v cygpath >/dev/null 2>&1; then WORK="$(cygpath -m "$WORK")"; TOOL_ROOT="$(cygpath -m "$TOOL_ROOT")"; fi
 trap 'rm -rf "$WORK"' EXIT
 export SWARMFORGE_WAKE_CMD=none
 
@@ -194,9 +195,10 @@ mkdir -p "$PROJECT/.swarmforge"
 printf 'coder\tmaster\t%s\tcoder\tcoder\tclaude\ttask\ncleaner\tcleaner\t%s\tcleaner\tcleaner\tclaude\tbatch\n' \
   "$CODER" "$CLEANER" > "$PROJECT/.swarmforge/roles.tsv"
 # The cleaner "worktree" needs to resolve the project root and the commit.
-ln -s "$PROJECT/.git" "$CLEANER/.git"
+printf 'gitdir: %s
+' "$(cygpath -w "$PROJECT/.git" 2>/dev/null || echo "$PROJECT/.git")" > "$CLEANER/.git"
 ln -s "$PROJECT/.swarmforge" "$CLEANER/.swarmforge" 2>/dev/null || true
-rm -f "$CLEANER/.swarmforge"; mkdir -p "$CLEANER/.swarmforge"
+rm -rf "$CLEANER/.swarmforge"; mkdir -p "$CLEANER/.swarmforge"
 cp "$PROJECT/.swarmforge/roles.tsv" "$CLEANER/.swarmforge/roles.tsv"
 for wt in "$CODER" "$CLEANER"; do
   mkdir -p "$wt/swarmforge"
@@ -1172,8 +1174,13 @@ cat > fake-wake <<'EOF'
 echo "WAKE $*" >> "$(dirname "$0")/wakes.log"
 EOF
 chmod +x fake-wake
+WAKE_BIN="$FP/fake-wake"
+if command -v cygpath >/dev/null 2>&1; then
+  printf '@echo WAKE %%* >> "%%~dp0wakes.log"\r\n' > fake-wake.bat
+  WAKE_BIN="$(cygpath -m "$FP")/fake-wake.bat"
+fi
 "$SCRIPTS/squad_assign.sh" create wk0 implementer instr.md > /dev/null
-SWARMFORGE_WAKE_CMD="$FP/fake-wake" bb "$SCRIPTS/squadd.bb" "$FP" --once
+SWARMFORGE_WAKE_CMD="$WAKE_BIN" bb "$SCRIPTS/squadd.bb" "$FP" --once
 grep -q '^WAKE agent prompt squad-leader ' wakes.log \
   || { cat wakes.log 2>/dev/null; fail "wake should reach the leader agent from roles.tsv"; }
 ok "wake command carries the leader agent name"
@@ -1228,7 +1235,7 @@ git -c user.email=smoke@test -c user.name=smoke commit -qam "conflicting main ch
 printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$XC" > fx1.handoff
 "$SCRIPTS/squad_assign.sh" result fx1 fx1.handoff > /dev/null
 rm -f wakes.log
-SWARMFORGE_WAKE_CMD="$FP/fake-wake" bb "$SCRIPTS/squadd.bb" "$FP" > /dev/null 2>&1 &
+SWARMFORGE_WAKE_CMD="$WAKE_BIN" bb "$SCRIPTS/squadd.bb" "$FP" > /dev/null 2>&1 &
 SQDPID=$!
 sleep 3
 [ "$(grep -c '^WAKE ' wakes.log 2>/dev/null)" -eq 1 ] \

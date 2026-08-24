@@ -58,6 +58,10 @@
   (atom #{}))
 
 (def swarm-bin (or (not-empty (System/getenv "SWARM_BIN")) "swarm"))
+;; Windows cannot exec a shebang script directly; run the launcher through bb.
+(def swarm-cmd (if (str/starts-with? (System/getProperty "os.name") "Windows")
+                 ["bb" swarm-bin]
+                 [swarm-bin]))
 (def no-agent-args (if (System/getenv "SWARMFORGE_NO_AGENT") ["--no-agent"] []))
 
 (defn log! [& parts]
@@ -130,7 +134,7 @@
     (if (str/blank? (str template))
       (log! "spawn-skipped" target "spawn-request record missing or has no template")
       (let [{:keys [exit] :as result}
-            (apply sh swarm-bin "squad" "spawn" target template no-agent-args)]
+            (apply sh (concat swarm-cmd ["squad" "spawn" target template] no-agent-args))]
         (if (zero? exit)
           (do (bb-script "squad_spawn_request.bb" "drop" target)
               (event! target "squadd-spawn" (str "template=" template))
@@ -193,7 +197,7 @@
 
 (defn retire! [{:keys [target reason]}]
   (let [{:keys [exit] :as result}
-        (apply sh swarm-bin "squad" "retire" target "daemon" no-agent-args)]
+        (apply sh (concat swarm-cmd ["squad" "retire" target "daemon"] no-agent-args))]
     (if (zero? exit)
       (do (event! target "squadd-retire-worker" reason)
           (log! "retired" target))
@@ -222,8 +226,9 @@
   (let [cmd (or (System/getenv "SWARMFORGE_WAKE_CMD") "herdr")]
     (when-not (= "none" cmd)
       (if-let [agent (leader-agent-name)]
-        (let [{:keys [exit err]} (process/sh {:continue true}
-                                             cmd "agent" "prompt" agent wake-message)]
+        (let [{:keys [exit err]} (try (process/sh {:continue true}
+                                                  cmd "agent" "prompt" agent wake-message)
+                                      (catch Exception e {:exit 1 :err (ex-message e)}))]
           (if (zero? exit)
             (log! "waked" agent)
             (log! "wake-failed" agent (str/trim (or err "")))))
@@ -266,10 +271,11 @@
       (let [cmd (or (System/getenv "SWARMFORGE_WAKE_CMD") "herdr")]
         (if (= "none" cmd)
           (log! "user-notify-skipped" id)
-          (let [{:keys [exit err]} (process/sh {:continue true}
-                                               cmd "notification" "show"
-                                               (str "Approval needed: " title)
-                                               "--body" (str reason "  ->  swarm squad approve " id))]
+          (let [{:keys [exit err]} (try (process/sh {:continue true}
+                                                    cmd "notification" "show"
+                                                    (str "Approval needed: " title)
+                                                    "--body" (str reason "  ->  swarm squad approve " id))
+                                        (catch Exception e {:exit 1 :err (ex-message e)}))]
             (if (zero? exit)
               (log! "user-notified" id)
               (log! "user-notify-failed" id (str/trim (or err "")))))))
