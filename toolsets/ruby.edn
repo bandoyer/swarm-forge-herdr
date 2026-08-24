@@ -16,7 +16,7 @@
 
   :crap
   {:command "crap4rb --lcov coverage/lcov.info <source-dir>"
-   :install "clone github.com/bandoyer/crap4rb (Prism-based port of crap4net — port pending; doctor stays MISSING until it lands)"
+   :install "clone github.com/bandoyer/crap4rb and symlink exe/crap4rb onto PATH (e.g. into ~/.local/bin)"
    :notes "CRAP = complexity^2 x (1-coverage)^3 + complexity, computed per method from source + lcov — same formula and bar as crap4net: every method <= 6 (exit 2 lists offenders). Requires fresh coverage first."}
 
   :dry
