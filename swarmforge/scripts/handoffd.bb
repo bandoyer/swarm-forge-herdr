@@ -58,8 +58,9 @@
 (defn wake! [agent-name]
   (let [cmd (or (System/getenv "SWARMFORGE_WAKE_CMD") "herdr")]
     (when-not (= "none" cmd)
-      (let [{:keys [exit err]} (process/sh {:continue true}
-                                           cmd "agent" "prompt" agent-name wake-message)]
+      (let [{:keys [exit err]} (try (process/sh {:continue true}
+                                                cmd "agent" "prompt" agent-name wake-message)
+                                    (catch Exception e {:exit 1 :err (ex-message e)}))]
         (if (zero? exit)
           (log! "waked" agent-name)
           (log! "wake-failed" agent-name (str/trim (or err ""))))))))
