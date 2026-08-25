@@ -23,6 +23,11 @@ expect() { # expect <label> <needle> <<< haystack
   ok "$1"
 }
 
+step "agent session guides stay synchronized"
+diff -u "$TOOL_ROOT/CLAUDE.md" "$TOOL_ROOT/AGENTS.md" \
+  || fail "CLAUDE.md and AGENTS.md drifted; Grok discovers both"
+ok "Claude, Codex, and Grok receive the same repository operations guide"
+
 step "installed prompts match their sources"
 # This repo dogfoods itself, so swarmforge/ holds installed copies of the
 # stock prompts. Drift there means a fix landed in prompts/ and never

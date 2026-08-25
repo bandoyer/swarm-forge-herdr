@@ -17,7 +17,7 @@ Two operating modes are available:
 | **Squad** | One persistent leader with transient, assignment-bound workers | Work that needs decomposition, parallelism, or ongoing judgment |
 
 The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
-200+ check headless smoke suite and has also been validated with live agents.
+250+ check headless smoke suite and has also been validated with live agents.
 
 ## Requirements
 
