@@ -29,7 +29,11 @@ The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
 The bundled presets select their agent CLI explicitly:
 
 - The standard `two`, `four`, `six`, and `adversaries` presets use Claude.
+- Model-pinned Claude adversaries variants include full Opus 4.6 and Opus 5
+  presets at maximum effort.
 - Codex presets are provided for adversaries and isolated six-role runs.
+- Grok presets are provided for adversaries and six-role runs, with optional
+  isolation behind a human integration boundary.
 - One experimental six-role preset uses Grok for the coder and Codex for the
   other roles.
 - `six-all-models-review` assigns benchmark-selected roles across Claude,
@@ -152,10 +156,15 @@ branches intact for inspection.
 | `two` | `coder` | coder → cleaner → coder | Claude; coder uses project root |
 | `adversaries` | `coder` | coder ↔ hostile reviewer until clean | Claude; coder uses project root |
 | `adversaries-sonnet`, `adversaries-sonnet-opus`, `adversaries-opus`, `adversaries-opus-fable` | `coder` | Same adversarial loop with pinned Claude models | Coder uses project root |
+| `adversaries-opus46`, `adversaries-opus5` | `coder` | Same adversarial loop with full Claude model IDs at max effort | Coder uses project root |
 | `adversaries-codex` | `coder` | Codex coder ↔ Codex reviewer | Coder uses project root; sandbox bypassed |
 | `adversaries-codex-review` | `coder` | Codex coder ↔ Codex reviewer | Both isolated; terminal candidate requires human integration |
+| `adversaries-grok` | `coder` | Grok coder ↔ Grok reviewer | Coder uses project root; permission checks bypassed |
+| `adversaries-grok-review` | `coder` | Grok coder ↔ Grok reviewer | Both isolated; terminal candidate requires human integration |
 | `four` | `specifier` | specifier → coder → refactorer → architect | Claude; specifier uses root, later roles are isolated |
 | `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Claude; specifier uses root, later roles are isolated |
+| `six-grok` | `specifier` | Six-role evidence pipeline | Grok; specifier uses root, later roles are isolated |
+| `six-grok-review` | `specifier` | Isolated six-role evidence pipeline | Grok; terminal result requires human integration |
 | `six-codex-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Codex; terminal result requires human integration |
 | `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Grok coder, Codex otherwise; human integration |
 | `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |

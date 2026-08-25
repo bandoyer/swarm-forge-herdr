@@ -1,0 +1,30 @@
+# Article: Pack (six, human integration gate)
+
+Roles: specifier, coder, cleaner, architect, hardener, qa.
+
+Chain: specifier -> coder -> cleaner -> architect -> hardener -> qa.
+A passing qa broadcasts completion to every other role; a qa finding
+routes back to specifier and the chain runs again.
+
+- specifier turns a request into an accepted specification, then sends a
+  git_handoff to coder.
+- coder implements the specified slice, then forwards to cleaner.
+- cleaner cleans the implementation, then forwards to architect.
+- architect reviews structure and boundaries, then forwards to hardener.
+- hardener produces quality evidence (coverage, mutation, complexity,
+  duplication) and fixes what fails the bars, then forwards to qa.
+- qa runs the acceptance and unit suites and verifies the slice against
+  its specification. A substantive finding, delivered behavior that
+  contradicts the specification or specified behavior with no test, goes
+  back to specifier as a git_handoff carrying the qa commit; that handoff
+  continues the chain, and specifier slices the finding into new work.
+- Routing back is bounded: at most two findings per task name. When a
+  third verification of the same task fails, qa stops and puts the
+  situation to the user instead of sending the slice round again.
+- A passing verification is TERMINAL for implementation. Qa sends the
+  completion git_handoff to specifier,coder,cleaner,architect,hardener;
+  each recipient merges it and stops.
+- No role integrates, rebases, or pushes the terminal candidate to the
+  project root's protected branch. The operator verifies the terminal
+  candidate and presents it for human review. Only the operator
+  integrates it after the human explicitly approves.

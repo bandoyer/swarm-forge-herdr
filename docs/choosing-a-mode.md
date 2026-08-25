@@ -36,11 +36,11 @@ reviewer has caught durability bugs, log injection, and argv injection.
 Cost: 2 agents; loops until clean, so hard tasks cost more — that's the
 feature.
 
-Use the `adversaries-codex-review` preset when a human must inspect the
-terminal candidate before integration. Both roles stay in linked
-worktrees, and the project root remains untouched until the operator
-integrates an explicitly approved result. This adds an integration gate,
-not another agent or another review pass.
+Use `adversaries-codex-review` or `adversaries-grok-review` when a human must
+inspect the terminal candidate before integration. Both roles stay in linked
+worktrees, and the project root remains untouched until the operator integrates
+an explicitly approved result. This adds an integration gate, not another
+agent or another review pass.
 
 ### four-pack — specifier → coder → refactorer → architect
 *The spec-driven loop.* Requirements are pinned before code exists;
