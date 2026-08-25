@@ -50,6 +50,11 @@ renders a constitution article with exact commands and runs a doctor pass.
 installable via `bin/install-crap4net`, dogfooded on itself). dotnet doctor
 fully green on this machine (dotnet, stryker, crap4net, jscpd).
 
+Ruby added 2026-08-23 with Rails-default Minitest, SimpleCov lcov, Mutant,
+crap4rb, jscpd, Packwerk, and Rails system-test lanes. Rust added 2026-08-25
+with workspace tests, cargo-llvm-cov, cargo-mutants, crap4rs, jscpd, Cargo
+dependency inspection, and ignored-test acceptance lanes.
+
 ### `toolsets/clojure` — upstream's own tools
 
 Import mode: clone unclebob/{clj-mutate, crap4clj, dry4clj,

@@ -111,7 +111,7 @@ starting agents:
 4. Optionally install a quality-tool profile:
 
 ```sh
-swarm toolset dotnet    # or: swarm toolset clojure | ruby
+swarm toolset dotnet    # or: swarm toolset clojure | ruby | rust
 ```
 
 The toolset command writes the declared commands into the constitution and
@@ -297,7 +297,7 @@ starts.
 |---|---|
 | `swarm init <pack>` | Install one pack's config, constitution, prompts, and contracts |
 | `swarm switch <pack>` | Replace the pack config/article while retaining project customization |
-| `swarm toolset <dotnet\|clojure\|ruby>` | Write the quality-tool article and report missing tools |
+| `swarm toolset <dotnet\|clojure\|ruby\|rust>` | Write the quality-tool article and report missing tools |
 | `swarm up` | Create worktrees, start pack agents, and start the handoff router |
 | `swarm bootstrap [role]` | Resend role instructions after a startup dialog or restart |
 | `swarm prompt <role> <text>` | Send a task to a pack role |
@@ -336,9 +336,9 @@ evidence pattern in `swarmforge/contracts/`.
 
 ### A quality command is missing
 
-Run `swarm toolset` with your profile (`dotnet`, `clojure`, `ruby`) again to see the doctor
-report and installation hints. Project-specific commands still belong in
-`swarmforge/constitution/articles/project.prompt`.
+Run `swarm toolset` with your profile (`dotnet`, `clojure`, `ruby`, or `rust`)
+again to see the doctor report and installation hints. Project-specific
+commands still belong in `swarmforge/constitution/articles/project.prompt`.
 
 ### The timeline is not enough
 

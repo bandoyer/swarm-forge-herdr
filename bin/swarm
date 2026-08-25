@@ -5,7 +5,7 @@
 ;;   swarm init <pack>      copy a pack preset + prompts into the project
 ;;   swarm switch <pack>    change packs: replace conf + pack article, add
 ;;                          missing role prompts; project/toolset kept
-;;   swarm toolset <name>   install a quality-toolset article (dotnet, clojure)
+;;   swarm toolset <name>   install a quality-toolset article
 ;;   swarm up               start worktrees, agents, and the handoff router
 ;;   swarm bootstrap [role] (re)send role prompts to running agents
 ;;   swarm prompt <role> <text>   send a task to a role by its short name

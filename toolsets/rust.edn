@@ -1,0 +1,42 @@
+{:name "rust"
+ :description "Quality toolset for Rust workspaces — cargo-native, llvm-cov flavored."
+ :purposes
+ {:test
+  {:command "cargo test --workspace"
+   :notes "Full unit suite; green before any handoff. Plus `cargo clippy --all-targets` clean and `cargo fmt --check` — warnings are work, not noise. Tests that need live services, a browser, or the network are never in this lane: put them behind `#[ignore]` or a feature flag and run them under acceptance. Keep this lane fast — mutation re-runs it once per mutant."}
+
+  :coverage
+  {:command "cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info"
+   :install "cargo install cargo-llvm-cov --locked (fetches llvm-tools on first run)"
+   :notes "Writes lcov to coverage/lcov.info. Regenerate before reading any coverage-derived metric; stale coverage invalidates everything built on it. Note llvm-cov and plain `cargo test` use separate target profiles, so the first run rebuilds."}
+
+  :mutation
+  {:command "cargo mutants"
+   :install "cargo install cargo-mutants --locked"
+   :notes "Scope runs to the slice's files (e.g. -f src/foo.rs, or -p <crate> in a workspace) — an unscoped run over a workspace can take hours. Surviving mutants in the slice's scope are work: kill them with better tests or record precisely why each survivor is unkillable. Results land in mutants.out/."}
+
+  :crap
+  {:command "crap4rs --lcov coverage/lcov.info <source-dir>"
+   :install "clone github.com/bandoyer/crap4rs, cargo build --release, symlink target/release/crap4rs onto PATH (e.g. into ~/.local/bin)"
+   :notes "CRAP = complexity^2 x (1-coverage)^3 + complexity, computed per function from source + lcov — same formula and bar as crap4net and crap4rb: every function <= 6 (exit 2 lists offenders). Requires fresh coverage first. Macro bodies (matches!, assert!) are opaque to the complexity count."}
+
+  :dry
+  {:command "jscpd --min-tokens 50 --reporters console <source-dir>"
+   :install "npm install -g jscpd"
+   :notes "Language-agnostic; same tool and bar as the dotnet and ruby toolsets. Duplication within the slice's scope gets removed or explicitly justified."}
+
+  :boundaries
+  {:command "cargo tree --workspace --edges normal --depth 1"
+   :notes "Workspace crates are the boundary mechanism: the compiler already forbids cycles, so the bar is dependency *direction* — inspect the tree against the layering the project article declares (e.g. protocol depends on nothing; cli and daemon depend on protocol, never on each other). A new inter-crate edge is an architectural decision, not a convenience."}
+
+  :acceptance
+  {:command "cargo test --workspace -- --ignored"
+   :notes "The slow lane: end-to-end tests that touch live services, spawn real processes, or drive a browser, marked #[ignore] (or gated behind a feature the project article names). Slow by design: never fold into the unit lane, and mutation never runs against it."}}
+
+ :doctor
+ [["rustc" "--version"]
+  ["cargo" "--version"]
+  ["cargo" "llvm-cov" "--version"]
+  ["cargo" "mutants" "--version"]
+  ["jscpd" "--version"]
+  ["crap4rs" "--help"]]}
