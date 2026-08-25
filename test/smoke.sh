@@ -103,6 +103,67 @@ expect "protected branch: launch rejected" \
 [ ! -d "$PROTECTED/.worktrees" ] || fail "rejected launch should create no worktrees"
 ok "protected branch rejection happens before worktree creation"
 
+step "launcher retries a fresh Herdr pane until its shell is ready"
+RETRY_PROJECT="$WORK/retry-project"
+RETRY_BIN="$WORK/retry-bin"
+RETRY_CALLS="$WORK/retry-herdr-calls.log"
+RETRY_STARTS="$WORK/retry-herdr-starts"
+mkdir -p "$RETRY_PROJECT/swarmforge" "$RETRY_BIN"
+git -C "$RETRY_PROJECT" init -qb main
+printf 'window reviewer claude master task\n' \
+  > "$RETRY_PROJECT/swarmforge/swarmforge.conf"
+git -C "$RETRY_PROJECT" add swarmforge/swarmforge.conf
+git -C "$RETRY_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -qm initial
+cat > "$RETRY_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$RETRY_CALLS"
+case "${1-} ${2-}" in
+  "workspace create")
+    printf '{"result":{"workspace_id":"ws-retry"}}\n'
+    ;;
+  "workspace close")
+    printf '{"result":{}}\n'
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  "agent start")
+    count=0
+    [ ! -f "$RETRY_STARTS" ] || read -r count < "$RETRY_STARTS"
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$RETRY_STARTS"
+    if [ "$count" -eq 1 ]; then
+      printf '{"error":{"code":"pane_not_ready","message":"pane is not an available shell"}}\n' >&2
+      exit 1
+    fi
+    printf '{"result":{}}\n'
+    ;;
+  "agent prompt")
+    printf '{"result":{}}\n'
+    ;;
+  "tab create")
+    printf '{"result":{"tab_id":"tab-retry","pane_id":"pane-retry"}}\n'
+    ;;
+  *)
+    printf 'unexpected fake herdr call: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$RETRY_BIN/herdr"
+OUT="$(cd "$RETRY_PROJECT" && \
+  PATH="$RETRY_BIN:$PATH" RETRY_CALLS="$RETRY_CALLS" RETRY_STARTS="$RETRY_STARTS" \
+  "$TOOL_ROOT/bin/swarm" up 2>&1)"
+expect "shell-ready retry: swarm starts" "Swarm is up: reviewer" <<<"$OUT"
+[ "$(cat "$RETRY_STARTS")" -eq 2 ] \
+  || fail "shell-ready retry should make exactly two start attempts"
+ok "shell-ready retry makes another agent start attempt"
+(cd "$RETRY_PROJECT" && \
+  PATH="$RETRY_BIN:$PATH" RETRY_CALLS="$RETRY_CALLS" RETRY_STARTS="$RETRY_STARTS" \
+  "$TOOL_ROOT/bin/swarm" down >/dev/null)
+
 step "review-gated Codex pack isolates both roles"
 REVIEW_PACK="$WORK/review-pack"
 mkdir -p "$REVIEW_PACK"

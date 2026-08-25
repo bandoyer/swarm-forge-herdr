@@ -282,8 +282,16 @@
                          "--env" (str "SWARMFORGE_ROLE=" role)
                          "--no-focus")
               pane-id (find-id tab "pane")
-              start (apply herdr-try "agent" "start" agent-name "--kind" agent-kind "--pane" pane-id
-                           (when (seq extra-args) (cons "--" extra-args)))]
+              ;; A fresh tab's shell may not be ready yet (herdr reports
+              ;; "not an available shell"); retry briefly before giving up.
+              start (loop [attempt 1]
+                      (let [res (apply herdr-try "agent" "start" agent-name "--kind" agent-kind "--pane" pane-id
+                                       (when (seq extra-args) (cons "--" extra-args)))]
+                        (if (and (not (:ok? res))
+                                 (str/includes? (str (:error-message res)) "not an available shell")
+                                 (< attempt 15))
+                          (do (Thread/sleep 2000) (recur (inc attempt)))
+                          res)))]
           (cond
             (:ok? start)
             (let [prompted (herdr-try "agent" "prompt" agent-name (bootstrap-prompt role worktree-path))]
