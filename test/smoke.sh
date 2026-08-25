@@ -249,6 +249,255 @@ grep -q 'Only the operator' "$CLAUDE_CODEX_PROMPT" \
   || fail "Claude-Codex pack should retain the human integration gate"
 ok "Claude and Codex six-pack is invokable with pinned isolated roles"
 
+step "every provider-specific pack initializes from a complete pair"
+for conf in "$TOOL_ROOT"/packs/*.conf; do
+  pack="$(basename "$conf" .conf)"
+  pack_project="$WORK/pack-$pack"
+  [ -f "$TOOL_ROOT/packs/$pack.prompt" ] \
+    || fail "$pack.conf has no matching pack article"
+  mkdir -p "$pack_project"
+  (cd "$pack_project" && "$TOOL_ROOT/bin/swarm" init "$pack" >/dev/null)
+  diff -q "$conf" "$pack_project/swarmforge/swarmforge.conf" >/dev/null \
+    || fail "$pack config changed during init"
+  diff -q "$TOOL_ROOT/packs/$pack.prompt" \
+    "$pack_project/swarmforge/constitution/articles/pack.prompt" >/dev/null \
+    || fail "$pack article changed during init"
+done
+ok "every pack has a matching article and survives initialization"
+
+for spec in \
+  'adversaries-opus46.conf|claude-opus-4-6' \
+  'adversaries-opus5.conf|claude-opus-5'; do
+  file="${spec%%|*}"
+  model="${spec#*|}"
+  [ "$(grep -c "^window .* claude .* --model $model --effort max$" \
+      "$TOOL_ROOT/packs/$file")" -eq 2 ] \
+    || fail "$file should pin both roles to $model at max effort"
+done
+ok "Claude adversaries variants pin full Opus model IDs and effort"
+
+for file in \
+  adversaries-grok.conf adversaries-grok-review.conf \
+  six-grok.conf six-grok-review.conf; do
+  windows="$(grep -c '^window ' "$TOOL_ROOT/packs/$file")"
+  pinned="$(grep -c '^window .* grok .* --model grok-4.6 --reasoning-effort high --permission-mode bypassPermissions --no-subagents --disable-web-search$' \
+    "$TOOL_ROOT/packs/$file")"
+  [ "$windows" -eq "$pinned" ] \
+    || fail "$file should pin every role to the unattended Grok profile"
+done
+ok "Grok pack variants pin model, effort, permissions, and tool boundaries"
+
+for pack in adversaries-grok-review six-grok-review; do
+  grep -q 'Only the operator' "$TOOL_ROOT/packs/$pack.prompt" \
+    || fail "$pack should retain its human integration gate"
+  grep -qE '^window .* grok (master|none) ' "$TOOL_ROOT/packs/$pack.conf" \
+    && fail "$pack should keep every role out of the project root"
+done
+ok "review-gated Grok variants isolate every role behind human integration"
+
+step "Rust toolset writes a complete quality article"
+RUST_TOOLSET_PROJECT="$WORK/rust-toolset"
+mkdir -p "$RUST_TOOLSET_PROJECT"
+OUT="$(cd "$RUST_TOOLSET_PROJECT" && "$TOOL_ROOT/bin/swarm" toolset rust 2>&1)"
+RUST_ARTICLE="$RUST_TOOLSET_PROJECT/swarmforge/constitution/articles/toolset.prompt"
+expect "Rust toolset: doctor runs" "Doctor:" <<<"$OUT"
+grep -q '^# Article: Toolset (rust)$' "$RUST_ARTICLE" \
+  || fail "Rust toolset article has the wrong title"
+for command in \
+  'cargo test --workspace' \
+  'cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info' \
+  'cargo mutants' \
+  'crap4rs --lcov coverage/lcov.info <source-dir>' \
+  'jscpd --min-tokens 50 --reporters console <source-dir>' \
+  'cargo tree --workspace --edges normal --depth 1' \
+  'cargo test --workspace -- --ignored'; do
+  grep -qF "$command" "$RUST_ARTICLE" \
+    || fail "Rust toolset article omitted: $command"
+done
+ok "Rust toolset preserves every declared quality purpose"
+
+make_retire_project() { # make_retire_project <project>
+  local project="$1"
+  local role_path="$project/.worktrees/candidate"
+  mkdir -p "$project/swarmforge" "$project/.worktrees"
+  git -C "$project" init -qb main
+  printf 'base\n' > "$project/tracked.txt"
+  printf '.swarmforge/\n.worktrees/\n' > "$project/.gitignore"
+  printf 'window coder claude candidate task\n' \
+    > "$project/swarmforge/swarmforge.conf"
+  git -C "$project" add .gitignore tracked.txt swarmforge/swarmforge.conf
+  git -C "$project" -c user.email=smoke@test -c user.name=smoke \
+    commit -qm initial
+  git -C "$project" worktree add -qb swarmforge-candidate "$role_path" main
+  mkdir -p "$project/.swarmforge"
+  printf 'coder\tcandidate\t%s\tretire-coder\tcoder\tclaude\ttask\n' \
+    "$role_path" > "$project/.swarmforge/roles.tsv"
+}
+
+RETIRE_BIN="$WORK/retire-bin"
+mkdir -p "$RETIRE_BIN"
+cat > "$RETIRE_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1-} ${2-}" in
+  "agent list")
+    case "${RETIRE_HERDR_MODE:-empty}" in
+      empty) printf '{"result":{"agents":[]}}\n' ;;
+      error)
+        printf '{"error":{"code":"server_unavailable","message":"test Herdr unavailable"}}\n' >&2
+        exit 1
+        ;;
+      *) printf 'unexpected RETIRE_HERDR_MODE: %s\n' "$RETIRE_HERDR_MODE" >&2; exit 1 ;;
+    esac
+    ;;
+  "workspace close")
+    printf '{"result":{}}\n'
+    ;;
+  *)
+    printf 'unexpected fake herdr call: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$RETIRE_BIN/herdr"
+
+step "pack retire refuses an unmerged role branch before shutdown"
+RETIRE_UNMERGED="$WORK/retire-unmerged"
+make_retire_project "$RETIRE_UNMERGED"
+printf 'role commit\n' >> "$RETIRE_UNMERGED/.worktrees/candidate/tracked.txt"
+git -C "$RETIRE_UNMERGED/.worktrees/candidate" add tracked.txt
+git -C "$RETIRE_UNMERGED/.worktrees/candidate" \
+  -c user.email=smoke@test -c user.name=smoke commit -qm "role work"
+set +e
+OUT="$(cd "$RETIRE_UNMERGED" && "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "unmerged retirement should exit 1, got $STATUS"
+expect "retire: unmerged branch reported" \
+  "branch swarmforge-candidate is not merged into main" <<<"$OUT"
+[ -d "$RETIRE_UNMERGED/.worktrees/candidate" ] \
+  || fail "blocked retire removed the unmerged worktree"
+[ ! -e "$RETIRE_UNMERGED/.swarmforge/daemon/stop" ] \
+  || fail "first preflight should block before shutdown"
+ok "unmerged retirement preserves the untouched swarm"
+
+step "pack retire refuses tracked and unexpected untracked work"
+RETIRE_DIRTY="$WORK/retire-dirty"
+make_retire_project "$RETIRE_DIRTY"
+printf 'dirty\n' >> "$RETIRE_DIRTY/.worktrees/candidate/tracked.txt"
+printf 'operator draft\n' > "$RETIRE_DIRTY/.worktrees/candidate/draft.txt"
+set +e
+OUT="$(cd "$RETIRE_DIRTY" && "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "dirty retirement should exit 1, got $STATUS"
+expect "retire: tracked work reported" "tracked.txt" <<<"$OUT"
+expect "retire: unexpected untracked work reported" "draft.txt" <<<"$OUT"
+[ -d "$RETIRE_DIRTY/.worktrees/candidate" ] \
+  || fail "blocked retire removed the dirty worktree"
+ok "dirty retirement preserves the worktree"
+
+step "pack retire refuses pending handoffs"
+RETIRE_PENDING="$WORK/retire-pending"
+make_retire_project "$RETIRE_PENDING"
+PENDING_INBOX="$RETIRE_PENDING/.worktrees/candidate/.swarmforge/handoffs/inbox/new"
+mkdir -p "$PENDING_INBOX"
+printf 'type: note\n' > "$PENDING_INBOX/pending.handoff"
+set +e
+OUT="$(cd "$RETIRE_PENDING" && "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "pending retirement should exit 1, got $STATUS"
+expect "retire: pending handoff reported" "new inbox handoff state" <<<"$OUT"
+[ -d "$RETIRE_PENDING/.worktrees/candidate" ] \
+  || fail "blocked retire removed a worktree with pending handoffs"
+ok "pending handoff preserves the worktree"
+
+step "pack retire drains queues for project-root roles too"
+RETIRE_ROOT_PENDING="$WORK/retire-root-pending"
+make_retire_project "$RETIRE_ROOT_PENDING"
+printf 'window coder claude master task\nwindow reviewer claude candidate task\n' \
+  > "$RETIRE_ROOT_PENDING/swarmforge/swarmforge.conf"
+printf 'coder\tmaster\t%s\tretire-root-coder\tcoder\tclaude\ttask\nreviewer\tcandidate\t%s\tretire-root-reviewer\treviewer\tclaude\ttask\n' \
+  "$RETIRE_ROOT_PENDING" "$RETIRE_ROOT_PENDING/.worktrees/candidate" \
+  > "$RETIRE_ROOT_PENDING/.swarmforge/roles.tsv"
+ROOT_OUTBOX="$RETIRE_ROOT_PENDING/.swarmforge/handoffs/outbox"
+mkdir -p "$ROOT_OUTBOX"
+printf 'type: note\n' > "$ROOT_OUTBOX/pending.handoff"
+set +e
+OUT="$(cd "$RETIRE_ROOT_PENDING" && "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "root-role pending handoff should exit 1, got $STATUS"
+expect "retire: project-root pending handoff reported" \
+  "role coder has outbound handoff state" <<<"$OUT"
+[ -d "$RETIRE_ROOT_PENDING/.worktrees/candidate" ] \
+  || fail "root-role pending handoff removed the linked worktree"
+[ ! -e "$RETIRE_ROOT_PENDING/.swarmforge/daemon/stop" ] \
+  || fail "root-role queue blocker should stop the first preflight"
+ok "project-root pending handoff preserves the swarm"
+
+step "pack retire fails closed when Herdr cannot verify stopped agents"
+RETIRE_UNVERIFIED="$WORK/retire-unverified"
+make_retire_project "$RETIRE_UNVERIFIED"
+set +e
+OUT="$(cd "$RETIRE_UNVERIFIED" && \
+  PATH="$RETIRE_BIN:$PATH" RETIRE_HERDR_MODE=error \
+  "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "unverified agent shutdown should exit 1, got $STATUS"
+expect "retire: unavailable Herdr reported" \
+  "Cannot verify that configured role agents stopped" <<<"$OUT"
+[ -d "$RETIRE_UNVERIFIED/.worktrees/candidate" ] \
+  || fail "unverified agent shutdown removed the worktree"
+git -C "$RETIRE_UNVERIFIED" show-ref --verify --quiet refs/heads/swarmforge-candidate \
+  || fail "unverified agent shutdown removed the branch"
+ok "unverified agent shutdown preserves every Git artifact"
+
+step "pack retire removes only a fully integrated swarm"
+RETIRE_OK="$WORK/retire-ok"
+make_retire_project "$RETIRE_OK"
+mkdir -p "$RETIRE_OK/.worktrees/candidate/swarmforge/scripts"
+printf 'generated\n' > "$RETIRE_OK/.worktrees/candidate/swarmforge/scripts/runtime.sh"
+OUT="$(cd "$RETIRE_OK" && \
+  PATH="$RETIRE_BIN:$PATH" RETIRE_HERDR_MODE=empty \
+  "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+expect "retire: success reported" "Retired pack swarm into main." <<<"$OUT"
+expect "retire: removal counts reported" \
+  "Removed 1 role worktrees and 1 merged role branches." <<<"$OUT"
+[ ! -e "$RETIRE_OK/.worktrees/candidate" ] \
+  || fail "successful retire left the role worktree"
+git -C "$RETIRE_OK" show-ref --verify --quiet refs/heads/swarmforge-candidate \
+  && fail "successful retire left the role branch"
+[ ! -e "$RETIRE_OK/.swarmforge/roles.tsv" ] \
+  || fail "successful retire left stale role registration"
+git -C "$RETIRE_OK" status --short | grep -q . \
+  && fail "successful retire changed tracked project files"
+ok "successful retire preserves the integrated project"
+OUT="$(cd "$RETIRE_OK" && \
+  PATH="$RETIRE_BIN:$PATH" RETIRE_HERDR_MODE=empty \
+  "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+expect "retire: rerun is safe" \
+  "Removed 0 role worktrees and 0 merged role branches." <<<"$OUT"
+
+step "pack retire refuses mismatched runtime registration"
+RETIRE_MISMATCH="$WORK/retire-mismatch"
+make_retire_project "$RETIRE_MISMATCH"
+printf 'coder\tother\t%s\tretire-coder\tcoder\tclaude\ttask\n' \
+  "$RETIRE_MISMATCH/.worktrees/other" \
+  > "$RETIRE_MISMATCH/.swarmforge/roles.tsv"
+set +e
+OUT="$(cd "$RETIRE_MISMATCH" && "$TOOL_ROOT/bin/swarm" retire 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "mismatched runtime should exit 1, got $STATUS"
+expect "retire: runtime mismatch reported" \
+  "roles.tsv does not match swarmforge.conf" <<<"$OUT"
+[ -d "$RETIRE_MISMATCH/.worktrees/candidate" ] \
+  || fail "runtime mismatch removed a role worktree"
+ok "runtime mismatch preserves the swarm"
+
 CODER="$PROJECT"
 CLEANER="$WORK/cleaner"
 mkdir -p "$CLEANER"

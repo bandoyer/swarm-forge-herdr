@@ -13,6 +13,7 @@
 ;;                          approvals | approve | deny | report
 ;;   swarm logs [n]         interleaved timeline of all swarm activity
 ;;   swarm down             stop daemons and close the swarm workspace
+;;   swarm retire           remove a fully integrated pack swarm
 ;;   swarm status           show swarm runtime state
 ;;
 ;; swarmforge.conf format (upstream-compatible):
@@ -500,6 +501,198 @@
         (println "Closed herdr workspace" workspace-id))
       (println "No recorded herdr workspace; close it in herdr if one is open."))))
 
+(defn- git-result [& args]
+  (apply process/sh {:continue true} "git" "-C" (str project-root) args))
+
+(defn- git-success? [& args]
+  (zero? (:exit (apply git-result args))))
+
+(defn- git-output [& args]
+  (let [{:keys [exit out err]} (apply git-result args)]
+    (when-not (zero? exit)
+      (die (str "Command failed: git -C " project-root " " (str/join " " args))
+           (str/trim (str out "\n" err))))
+    (str/trim out)))
+
+(defn- expected-role-branch [{:keys [worktree-name]}]
+  (str "swarmforge-" worktree-name))
+
+(defn- registered-worktree-paths []
+  (->> (str/split-lines (git-output "worktree" "list" "--porcelain"))
+       (keep #(when (str/starts-with? % "worktree ")
+                (subs % (count "worktree "))))
+       set))
+
+(defn- runtime-pack-blockers [rows]
+  (let [roles-file (fs/path state-dir "roles.tsv")
+        actual (when (fs/exists? roles-file)
+                 (vec (for [line (str/split-lines (slurp (str roles-file)))
+                            :when (not (str/blank? line))
+                            :let [[role worktree-name path] (str/split line #"\t" -1)]]
+                        [role worktree-name path])))
+        expected (set (map (juxt :role :worktree-name :worktree-path) rows))]
+    (cond
+      (empty? actual) []
+      (some #(= "squad-leader" (first %)) actual)
+      ["squad runtime state is active; retire squad workers through `swarm squad retire`"]
+      (not= expected (set actual))
+      ["runtime roles.tsv does not match swarmforge.conf; refusing to guess which pack to remove"]
+      :else [])))
+
+(defn- files-under [root]
+  (let [found (atom [])]
+    (when (fs/exists? root)
+      (fs/walk-file-tree
+       root
+       {:visit-file (fn [file _attrs]
+                      (swap! found conj file)
+                      :continue)}))
+    @found))
+
+(defn- queue-blockers [{:keys [role worktree-path]}]
+  (let [handoffs (fs/path worktree-path ".swarmforge" "handoffs")
+        watched [["outbound" ["outbox"]]
+                 ["failed" ["failed"]]
+                 ["new inbox" ["inbox" "new"]]
+                 ["in-process inbox" ["inbox" "in_process"]]]]
+    (vec
+     (for [[label parts] watched
+           :let [dir (apply fs/path handoffs parts)]
+           file (files-under dir)]
+       (str "role " role " has " label " handoff state: "
+            (fs/relativize worktree-path file))))))
+
+(defn- allowed-generated-status? [line]
+  (boolean (re-matches #"\?\? swarmforge/scripts/?" line)))
+
+(defn- worktree-status-blockers [{:keys [role worktree-path]}]
+  (let [{:keys [exit out err]}
+        (process/sh {:continue true} "git" "-C" worktree-path
+                    "status" "--porcelain=v1" "--untracked-files=normal")]
+    (if (zero? exit)
+      (vec (for [line (str/split-lines out)
+                 :when (not (str/blank? line))
+                 :when (not (allowed-generated-status? line))]
+             (str "role " role " has worktree changes: " line)))
+      [(str "role " role " status failed: " (str/trim (str out "\n" err)))])))
+
+(defn- direct-role-worktree? [{:keys [worktree-name worktree-path]}]
+  (and (= (str (fs/normalize (fs/absolutize worktree-path)))
+          (str (fs/normalize (fs/absolutize (fs/path worktrees-dir worktree-name)))))
+       (try
+         (= (str (fs/parent (fs/real-path worktree-path)))
+            (str (fs/real-path worktrees-dir)))
+         (catch Exception _ false))))
+
+(defn- role-retire-blockers [target row registered]
+  (let [{:keys [role worktree-path]} row
+        branch (expected-role-branch row)
+        path-exists? (fs/exists? worktree-path)
+        marker-exists? (fs/exists? (fs/path worktree-path ".git"))
+        branch-exists? (git-success? "show-ref" "--verify" "--quiet"
+                                     (str "refs/heads/" branch))]
+    (vec
+     (concat
+      (when (and path-exists? (not (direct-role-worktree? row)))
+        [(str "role " role " path is not a direct child of .worktrees: " worktree-path)])
+      (when (and path-exists? (not marker-exists?))
+        [(str "role " role " path exists but is not a Git worktree: " worktree-path)])
+      (when (and marker-exists? (not (contains? registered worktree-path)))
+        [(str "role " role " path is not registered with Git: " worktree-path)])
+      (when (and marker-exists?
+                 (not= branch (str/trim
+                               (:out (process/sh {:continue true}
+                                                 "git" "-C" worktree-path
+                                                 "branch" "--show-current")))))
+        [(str "role " role " is not on its expected branch " branch)])
+      (when marker-exists? (worktree-status-blockers row))
+      (when marker-exists? (queue-blockers row))
+      (when (and path-exists? (not branch-exists?))
+        [(str "role " role " worktree exists but branch " branch " does not")])
+      (when (and branch-exists?
+                 (not (git-success? "merge-base" "--is-ancestor" branch target)))
+        [(str "role " role " branch " branch " is not merged into " target)])))))
+
+(defn- retire-blockers [target rows]
+  (let [linked (remove #(project-root-worktrees (:worktree-name %)) rows)
+        project-root-roles (filter #(project-root-worktrees (:worktree-name %)) rows)
+        registered (registered-worktree-paths)]
+    (vec (concat (runtime-pack-blockers rows)
+                 (mapcat queue-blockers project-root-roles)
+                 (mapcat #(role-retire-blockers target % registered) linked)))))
+
+(defn- require-retire-ready! [target rows]
+  (let [blockers (retire-blockers target rows)]
+    (when (seq blockers)
+      (slog! "retire: blocked into" target)
+      (apply die
+             (str "Cannot retire pack swarm into '" target "':")
+             (concat (map #(str "- " %) blockers)
+                     ["No role worktree or branch was removed."])))))
+
+(defn- wait-for-daemons-to-stop! []
+  (loop [attempt 0]
+    (let [running (filter daemon-running? [handoffd-daemon squadd-daemon])]
+      (cond
+        (empty? running) nil
+        (< attempt 50) (do (Thread/sleep 100) (recur (inc attempt)))
+        :else (die (str "Daemons did not stop: "
+                        (str/join ", " (map :name running)))
+                   "No role worktree or branch was removed.")))))
+
+(defn- require-role-agents-stopped! [rows]
+  (let [{:keys [ok? data error-message]} (herdr-try "agent" "list")]
+    (when-not ok?
+      (die "Cannot verify that configured role agents stopped after shutdown:"
+           error-message
+           "Start Herdr, close the swarm workspace, and retry."
+           "No role worktree or branch was removed."))
+    (let [running (set (keep #(or (:name %) (:label %))
+                             (get-in data [:result :agents])))
+          active (vec (filter running (map :agent-name rows)))]
+      (when (seq active)
+        (apply die
+               "Configured role agents are still registered after shutdown:"
+               (concat (map #(str "- " %) active)
+                       ["Close their Herdr workspace before retiring."
+                        "No role worktree or branch was removed."]))))))
+
+(defn retire! []
+  (when-not (fs/exists? (fs/path project-root ".git"))
+    (die "Run swarm from the root of a Git repository."))
+  (let [rows (parse-conf)
+        linked (vec (remove #(project-root-worktrees (:worktree-name %)) rows))
+        target (git-output "branch" "--show-current")]
+    (when (str/blank? target)
+      (die "Cannot retire a pack from a detached HEAD."
+           "Check out the integrated target branch first."))
+    ;; Check once while the swarm is untouched, then again after shutdown so
+    ;; an agent or router cannot race the destructive phase.
+    (require-retire-ready! target rows)
+    (slog! "retire: requested into" target)
+    (down!)
+    (wait-for-daemons-to-stop!)
+    (require-role-agents-stopped! rows)
+    (require-retire-ready! target rows)
+    (let [worktrees (vec (filter #(fs/exists? (:worktree-path %)) linked))
+          branches (vec (filter #(git-success? "show-ref" "--verify" "--quiet"
+                                              (str "refs/heads/" (expected-role-branch %)))
+                                linked))]
+      (doseq [{:keys [worktree-path]} worktrees]
+        (sh-ok "git" "-C" (str project-root) "worktree" "remove" "--force" worktree-path))
+      (sh-ok "git" "-C" (str project-root) "worktree" "prune")
+      (doseq [row branches]
+        (sh-ok "git" "-C" (str project-root) "branch" "-d" (expected-role-branch row)))
+      (fs/delete-if-exists (fs/path state-dir "roles.tsv"))
+      (slog! "retire: completed into" target
+             (str "worktrees=" (count worktrees))
+             (str "branches=" (count branches)))
+      (println (str "Retired pack swarm into " target "."))
+      (println "Removed" (count worktrees) "role worktrees and"
+               (count branches) "merged role branches.")
+      (println "Preserved launcher logs and provider session histories.")
+      (println "The next `swarm up` will recreate linked roles from current HEAD."))))
+
 (defn- handoff-file-events
   "Timeline events from one handoff file's lifecycle headers. Sender-side
   copies (outbox/sent/failed) report creation; recipient-side copies
@@ -795,11 +988,12 @@
     nil (up!)
     "bootstrap" (bootstrap! (second args))
     "down" (down!)
+    "retire" (retire!)
     "status" (status!)
     "logs" (logs! (second args))
     "prompt" (prompt! (second args) (str/join " " (drop 2 args)))
     "squad" (squad! (vec (rest args)))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | status | logs [n]]")))
+         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | retire | status | logs [n]]")))
 
 (-main *command-line-args*)

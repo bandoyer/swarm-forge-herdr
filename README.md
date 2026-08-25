@@ -140,7 +140,8 @@ swarm logs
 ```
 
 When the chain finishes, independently inspect the terminal commit and its
-evidence before integrating it. Stop the agents and both daemons with:
+evidence before integrating it. Stop the agents and both daemons while keeping
+their branches and worktrees available for inspection with:
 
 ```sh
 swarm down
@@ -148,6 +149,23 @@ swarm down
 
 `swarm down` closes the Herdr workspace but leaves Git worktrees and their
 branches intact for inspection.
+
+After the terminal candidate is integrated into the currently checked-out
+branch, retire the completed pack with:
+
+```sh
+swarm retire
+```
+
+Retirement refuses to delete anything unless every configured role branch is
+merged into the current `HEAD`, worktrees contain no tracked or unexpected
+untracked changes, runtime registration matches the pack, and every handoff
+queue is drained. It then stops the swarm, confirms through Herdr that the
+configured agents are gone, repeats the preflight, removes the linked worktrees
+and merged local role branches, and clears stale role registration. Launcher
+logs and provider session histories remain. See
+[`docs/pack-retirement.md`](docs/pack-retirement.md) for the complete safety
+contract.
 
 ### Choosing a pack
 
@@ -305,6 +323,7 @@ starts.
 | `swarm logs [n]` | Interleave launcher, daemon, squad, and handoff lifecycle events |
 | `swarm squad ...` | Start and operate squad mode |
 | `swarm down` | Stop daemons and close the recorded Herdr workspace |
+| `swarm retire` | Guard and remove a fully integrated fixed-pack swarm |
 
 ## Troubleshooting
 
@@ -365,6 +384,7 @@ agent with `herdr agent read <agent-name>`.
 Deeper reading:
 
 - [Choosing a mode](docs/choosing-a-mode.md)
+- [Pack retirement](docs/pack-retirement.md)
 - [Squad v2](docs/squad-v2.md)
 - [Squad advisor and daemon](docs/squad-s3.md)
 - [Squad approvals](docs/squad-s4.md)

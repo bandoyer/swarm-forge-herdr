@@ -92,6 +92,16 @@ proven live. Adversaries run surfaced and fixed the stale-worktree trap:
 WRONG_WORKTREE guard in all queue commands, worktree stated in bootstrap,
 stale-worktree warning in `swarm switch`.
 
+Model-pinned presets expanded 2026-08-25: full-ID Opus 4.6 and Opus 5
+adversaries packs, plus Grok adversaries and six-role packs with optional
+all-linked human integration gates. Pack launch also tolerates Herdr's brief
+fresh-tab shell-readiness race with a bounded retry.
+
+Pack retirement added 2026-08-25: `swarm down` remains a recoverable pause;
+the guarded `swarm retire` terminal operation verifies merged role tips, clean
+worktrees, and drained handoffs before removing linked role worktrees and local
+branches. Design: `docs/pack-retirement.md`.
+
 ## Phase 5 — v2 (in progress; design: docs/squad-v2.md)
 
 - [x] S1 contracts & evidence enforcement (2026-08-15): per-role
