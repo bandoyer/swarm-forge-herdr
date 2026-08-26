@@ -1470,7 +1470,6 @@ AFTER="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum
 [ "$FIRST" = "$SECOND" ] || fail "row 14 advisor output should be deterministic"
 ok "row 14 is read-only and deterministic"
 cd "$CODER"
-cd "$CODER"
 
 step "theme: create recovers from a crash-interrupted create"
 # A theme dir without status.edn (create interrupted between create-dirs

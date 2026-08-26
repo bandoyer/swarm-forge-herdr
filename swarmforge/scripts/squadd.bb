@@ -317,6 +317,11 @@
 
 ;; --- dead-worker reconciliation (S5) ---------------------------------------
 
+(defn- agent-record-name [agent]
+  (cond
+    (string? agent) agent
+    (map? agent) (or (:name agent) (:label agent))))
+
 (defn- parse-agent-names
   "Live agent-name set from a successful `herdr agent list` body, or nil
   when the body is not a usable agent list. An empty :agents array is
@@ -326,14 +331,10 @@
     (let [data (json/parse-string (str/trim (str stdout)) true)
           agents (get-in data [:result :agents])]
       (when (sequential? agents)
-        (set (keep (fn [agent]
-                     (cond
-                       (string? agent) agent
-                       (map? agent) (or (:name agent) (:label agent))))
-                   agents))))
+        (set (keep agent-record-name agents))))
     (catch Exception _ nil)))
 
-(defn observe-agents
+(defn- observe-agents
   "Authoritative live agent-name collection, or nil when herdr is
   unreachable: the command cannot start, exits nonzero, or does not
   yield a usable agent list."
@@ -373,13 +374,27 @@
     :allocated (>= (updated-age-seconds worker) allocated-grace-seconds)
     false))
 
-(defn- lose-worker!
+(defn- retire-lost-worker!
   "Retire through the existing swarm squad retire path, then append the
   S5 worker-lost event on success. Failure leaves the miss streak in
   place so a later poll retries."
   [worker]
-  (when (retire! {:target (:name worker) :reason "agent absent"})
-    (event! "worker-lost" (:name worker) "agent absent")))
+  (let [name (:name worker)]
+    (when (retire! {:target name :reason "agent absent"})
+      (swap! miss-streaks dissoc name)
+      (event! "worker-lost" name "agent absent"))))
+
+(defn- reconcile-worker!
+  "Reset a present worker's streak, or count one authoritative miss and
+  retire the worker when that miss reaches the loss threshold."
+  [live-agent-names worker]
+  (let [name (:name worker)]
+    (if (contains? live-agent-names name)
+      (swap! miss-streaks dissoc name)
+      (let [streak (inc (get @miss-streaks name 0))]
+        (swap! miss-streaks assoc name streak)
+        (when (>= streak loss-threshold)
+          (retire-lost-worker! worker))))))
 
 (defn reconcile-workers!
   "One authoritative herdr observation per poll. Unreachable herdr
@@ -388,15 +403,9 @@
   the worker. Misses one and two leave records, routing, and worktrees
   unchanged."
   []
-  (if-let [live (observe-agents)]
+  (if-let [live-agent-names (observe-agents)]
     (doseq [worker (filter reconciliation-candidate? (read-workers))]
-      (let [name (:name worker)]
-        (if (contains? live name)
-          (swap! miss-streaks assoc name 0)
-          (let [streak (inc (get @miss-streaks name 0))]
-            (swap! miss-streaks assoc name streak)
-            (when (>= streak loss-threshold)
-              (lose-worker! worker))))))
+      (reconcile-worker! live-agent-names worker))
     (log! "reconcile-skipped" "herdr-unreachable")))
 
 ;; --- poll loop --------------------------------------------------------------

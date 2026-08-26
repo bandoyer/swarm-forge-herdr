@@ -174,9 +174,7 @@
      ;; state only: an actually absent agent is not an orphan here until
      ;; reconciliation has retired (or never written) that worker.
      (for [a live :when (and (= :spawned (:state a))
-                             (not (some #(and (= (:id a) (:assignment %))
-                                              (squad-lib/active-states (:state %)))
-                                        workers)))]
+                             (empty? (active-for (:id a))))]
        (block "report-orphan" "residual" (:id a)
               "spawned assignment has no non-retired worker; leader must reject and replace it")))))
 
