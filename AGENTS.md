@@ -35,7 +35,8 @@ pids/logs. `.worktrees/` — one per role/worker.
 - Only `squadd` merges to main in squad mode; only the daemon spawns and
   retires. The leader touches records only.
 - The advisor is read-only and deterministic; every action it can emit
-  is in the 10+3-row table (docs/squad-s3.md + s4).
+  is in the 14-row table (docs/squad-s3.md rows 1-10, docs/squad-s4.md
+  rows 11-13, docs/squad-hardening-s5-spec.md row 14).
 - Contracts hard-block at `swarm_handoff`; workers inherit their
   template's contract.
 - herdr agent names: lowercase, ≤32 chars, project-prefixed

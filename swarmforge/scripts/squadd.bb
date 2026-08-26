@@ -4,13 +4,15 @@
 ;;
 ;; Each poll: shell the advisor (squad_next.bb --mechanical-only), apply its
 ;; blocks in table order — spawn / merge / drop-stale-spawn-request /
-;; retire-worker; wait-capacity is informational and skipped — then shell
-;; --residual-only and wake the squad-leader only when a residual target
-;; appears that the previous poll did not have (the leader polls judgment,
-;; not mechanics). The daemon is the sole owner of the project's main
-;; branch: nothing else merges, and it merges only while that branch
-;; ('main', or `main_branch <name>` in swarmforge/squad.conf) is checked
-;; out in the project root — anything else is skipped and retried.
+;; retire-worker; wait-capacity is informational and skipped — then
+;; reconcile :allocated/:active workers against one herdr agent list
+;; (S5), then shell --residual-only and wake the squad-leader only when a
+;; residual target appears that the previous poll did not have (the
+;; leader polls judgment, not mechanics). The daemon is the sole owner
+;; of the project's main branch: nothing else merges, and it merges only
+;; while that branch ('main', or `main_branch <name>` in
+;; swarmforge/squad.conf) is checked out in the project root — anything
+;; else is skipped and retried.
 ;;
 ;; Every applied action is logged to .swarmforge/squad/events.log; daemon
 ;; operations (start/stop, failures, wake-ups) go to squadd.log. All paths
@@ -28,6 +30,7 @@
 (ns squadd
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [cheshire.core :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -56,6 +59,21 @@
   target alone, so a known target whose advised action changes (review ->
   route-merger) still wakes the leader (reviewer finding, squadd)."
   (atom #{}))
+
+(def miss-streaks
+  "Consecutive successful herdr-list misses keyed by worker name.
+  In-process only: a daemon restart forgets the counters, matching S5's
+  rule that miss history need not survive a restart."
+  (atom {}))
+
+(def allocated-grace-seconds
+  "An :allocated worker younger than this is still in launch grace and
+  does not enter the miss counter (docs/squad-hardening-s5-spec.md)."
+  15)
+
+(def loss-threshold
+  "Consecutive successful misses that declare a candidate lost."
+  3)
 
 (def swarm-bin (or (not-empty (System/getenv "SWARM_BIN")) "swarm"))
 ;; Windows cannot exec a shebang script directly; run the launcher through bb.
@@ -200,8 +218,10 @@
         (apply sh (concat swarm-cmd ["squad" "retire" target "daemon"] no-agent-args))]
     (if (zero? exit)
       (do (event! target "squadd-retire-worker" reason)
-          (log! "retired" target))
-      (log! "retire-failed" target (failure-text result)))))
+          (log! "retired" target)
+          true)
+      (do (log! "retire-failed" target (failure-text result))
+          false))))
 
 (defn apply-block! [{:keys [action] :as block}]
   (case action
@@ -222,12 +242,12 @@
                 (when (= "squad-leader" role) agent-name)))
             (remove str/blank? (str/split-lines (slurp (str roles-file))))))))
 
-(defn wake-leader! []
+(defn wake-leader! [message]
   (let [cmd (or (System/getenv "SWARMFORGE_WAKE_CMD") "herdr")]
     (when-not (= "none" cmd)
       (if-let [agent (leader-agent-name)]
         (let [{:keys [exit err]} (try (process/sh {:continue true}
-                                                  cmd "agent" "prompt" agent wake-message)
+                                                  cmd "agent" "prompt" agent message)
                                       (catch Exception e {:exit 1 :err (ex-message e)}))]
           (if (zero? exit)
             (log! "waked" agent)
@@ -237,15 +257,25 @@
 (defn check-residuals!
   "Wake the leader only on residual [target action] pairs the previous
   poll did not have; a pair that disappears and returns wakes again on
-  return."
+  return. A new report-orphan residual names the orphaned assignment
+  id(s) in the wake notice so the leader can reject-and-replace."
   []
-  (let [pairs (set (map (juxt :target :action) (advisor-blocks "--residual-only")))
+  (let [blocks (advisor-blocks "--residual-only")
+        pairs (set (map (juxt :target :action) blocks))
+        fresh-pairs (remove @known-residuals pairs)
         fresh (sort (map (fn [[target action]] (str target ":" action))
-                         (remove @known-residuals pairs)))]
+                         fresh-pairs))
+        orphan-ids (sort (keep (fn [[target action]]
+                                 (when (= "report-orphan" action) target))
+                               fresh-pairs))
+        message (if (seq orphan-ids)
+                  (str wake-message " Orphaned assignment(s): "
+                       (str/join " " orphan-ids))
+                  wake-message)]
     (reset! known-residuals pairs)
     (when (seq fresh)
       (log! "residual-new" (str/join " " fresh))
-      (wake-leader!))))
+      (wake-leader! message))))
 
 ;; --- user notification (S4): one buzz per newly-pending approval ----------
 
@@ -285,6 +315,116 @@
                             #{})
                           id))))))
 
+;; --- dead-worker reconciliation (S5) ---------------------------------------
+
+(defn- agent-record-name
+  "Nonblank string name for one Herdr agent-list member, or nil when the
+  member has no usable name. A string member is itself the name; a map
+  supplies :name or, failing that, :label. Numbers, blank strings, and
+  maps without those fields are unusable — the caller fail-closes the
+  whole observation rather than dropping this member."
+  [agent]
+  (let [agent-name (cond
+                     (string? agent) agent
+                     (map? agent) (or (:name agent) (:label agent)))]
+    (when (and (string? agent-name) (not (str/blank? agent-name)))
+      agent-name)))
+
+(defn- parse-agent-names
+  "Live agent-name set from a successful `herdr agent list` body, or nil
+  when the body is not a usable agent list. An empty :agents array is
+  usable and yields #{}. A missing or non-sequential :agents value, or
+  any member that does not resolve to a nonblank string name, is
+  unusable — never a silently filtered partial set."
+  [stdout]
+  (try
+    (let [data (json/parse-string (str/trim (str stdout)) true)
+          agents (get-in data [:result :agents])]
+      (when (sequential? agents)
+        (let [names (mapv agent-record-name agents)]
+          (when (every? some? names)
+            (set names)))))
+    (catch Exception _ nil)))
+
+(defn- observe-agents
+  "Authoritative live agent-name collection, or nil when herdr is
+  unreachable: the command cannot start, exits nonzero, or does not
+  yield a usable agent list."
+  []
+  (let [{:keys [exit out]}
+        (try (process/sh {:continue true} "herdr" "agent" "list")
+             (catch Exception e {:exit 1 :out "" :err (ex-message e)}))]
+    (when (zero? exit)
+      (parse-agent-names out))))
+
+(defn- read-workers []
+  (let [dir (fs/path squad-dir "workers")]
+    (if (fs/exists? dir)
+      (->> (fs/list-dir dir)
+           (filter #(str/ends-with? (fs/file-name %) ".edn"))
+           (sort-by fs/file-name)
+           (mapv #(edn/read-string (slurp (str %)))))
+      [])))
+
+(defn- updated-age-seconds
+  "Seconds since :updated-at. Unparseable or missing stamps count as
+  older than launch grace so a corrupt record cannot hide forever."
+  [worker]
+  (try
+    (.getSeconds (java.time.Duration/between
+                  (java.time.Instant/parse (str (:updated-at worker)))
+                  (java.time.Instant/now)))
+    (catch Exception _ Long/MAX_VALUE)))
+
+(defn- reconciliation-candidate?
+  "Workers the miss counter may observe: every :active worker, and an
+  :allocated worker whose :updated-at is at least 15 seconds old.
+  :retired workers never enter."
+  [worker]
+  (case (:state worker)
+    :active true
+    :allocated (>= (updated-age-seconds worker) allocated-grace-seconds)
+    false))
+
+(defn- retire-lost-worker!
+  "Retire through the existing swarm squad retire path, then append the
+  S5 worker-lost event on success. Failure leaves the miss streak in
+  place so a later poll retries."
+  [worker]
+  (let [name (:name worker)]
+    (when (retire! {:target name :reason "agent absent"})
+      (swap! miss-streaks dissoc name)
+      (event! "worker-lost" name "agent absent"))))
+
+(defn- reconcile-worker!
+  "Reset a present worker's streak, or count one authoritative miss and
+  retire the worker when that miss reaches the loss threshold."
+  [live-agent-names worker]
+  (let [name (:name worker)]
+    (if (contains? live-agent-names name)
+      (swap! miss-streaks dissoc name)
+      (let [streak (inc (get @miss-streaks name 0))]
+        (swap! miss-streaks assoc name streak)
+        (when (>= streak loss-threshold)
+          (retire-lost-worker! worker))))))
+
+(defn reconcile-workers!
+  "One authoritative herdr observation per poll. Unreachable herdr
+  logs reconcile-skipped and changes no streaks. A candidate present in
+  the list resets its streak; a miss increments it; miss three retires
+  the worker. Misses one and two leave records, routing, and worktrees
+  unchanged."
+  []
+  (if-let [live-agent-names (observe-agents)]
+    (let [candidates (filter reconciliation-candidate? (read-workers))]
+      ;; A worker retired through any other path (mechanical rows 6/7,
+      ;; manual retire) must not leave a partial streak behind: the atom
+      ;; holds streaks of current candidates only.
+      (swap! miss-streaks select-keys (mapv :name candidates))
+      (doseq [worker candidates]
+        (reconcile-worker! live-agent-names worker)))
+    (log! "reconcile-skipped" "herdr-unreachable")))
+
 ;; --- poll loop --------------------------------------------------------------
 
 (defn should-stop? []
@@ -297,6 +437,11 @@
       (apply-block! block)
       (catch Exception e
         (log! "error" (str (:action block)) (str (:target block)) (ex-message e)))))
+  (when-not (should-stop?)
+    (try
+      (reconcile-workers!)
+      (catch Exception e
+        (log! "error" "reconcile" (ex-message e)))))
   (notify-pending-approvals!)
   (check-residuals!))
 
