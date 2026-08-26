@@ -1,0 +1,22 @@
+Task 'squad-hardening-s7': Implement S7a and S7b from docs/squad-hardening.md (daemon-owned transitions) and nothing else.
+
+S7a + S7b only. Do not implement S7c (git update hook) or S8. Do not resume uncommitted work.
+
+S7a — env gate: squadd already sets SWARM_BIN in its extra env. Add SWARMFORGE_SQUADD=1. squad_assign merge and merge-blocked die 2 DAEMON_ONLY unless that env is set. The leader prompt already forbids these commands; now they also fail closed if it tries. Honest: a leader that exports the variable still can. Smoke named in the design: merge without the env exits 2; squadd --once can still merge.
+
+S7b — leader contract: give squad-leader a stock contract whose meaning is "no git_handoff of a product commit." Today a missing contract means no enforcement — keep that. A present contract must not be confused with absence. Add :forbid-git-handoff true, or treat a present contract with empty :artifact-roots as a total write ban, and never treat absence that way. The leader can still write assignment records; those are not git_handoffs.
+
+This is a new operator assignment, not a continuation of S6. ready_for_next.sh returning NO_TASK is expected. The operator message is the assignment. Write a specification with concrete acceptance criteria, then hand the spec off. Specifier does not implement.
+
+Pin at least:
+- merge / merge-blocked without SWARMFORGE_SQUADD=1 exit 2 DAEMON_ONLY and write nothing
+- squadd --once still merges (smoke drives bb squadd.bb --once without the launcher extra-env map; the daemon process itself must present the gate to squad_assign, or that smoke path dies)
+- launcher extra-env on squadd still includes the var for the live daemon
+- missing contract still means no enforcement
+- a squad-leader with the stock contract cannot git_handoff a product commit
+- assignment-record writes stay legal
+- whether the leader's existing rework git_handoff (squad-leader.prompt: send a rework git_handoff back to the worker) remains legal, and how; S7b is "no product commit," not necessarily "no handoff protocol"
+- empty-diff and merge-commit edges if they would otherwise slip past empty :artifact-roots
+- prompts/ as source of truth, installed copies synced in the same commit (stock squad-leader contract + any prompt sentence)
+
+Keep the slice inside bin/, swarmforge/scripts/, test/, docs/, prompts/, swarmforge/roles/, swarmforge/contracts/, AGENTS.md, and CLAUDE.md. Include AGENTS.md and CLAUDE.md in the path list if an invariant lives there (daemon-only merge already does). Protocol tokens, exit codes, and file formats stay compatible except the additive DAEMON_ONLY token and any additive contract key. Smoke must stay green.
