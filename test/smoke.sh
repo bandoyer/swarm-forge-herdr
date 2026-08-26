@@ -901,14 +901,9 @@ expect "accept transition" "ASSIGNMENT_STATE: a1 result -> accepted" <<<"$OUT"
 
 step "squad: daemon-only merge transitions fail closed before record access"
 S7_EVENTS_BEFORE="$(wc -l < .swarmforge/squad/events.log)"
-for gated_case in "unset:merge:a1" "blank:merge:a1" \
-                  "unset:merge-blocked:a1" "blank:merge-blocked:a1" \
-                  "unset:merge:missing-s7"; do
-  gate_value="${gated_case%%:*}"
-  gated_rest="${gated_case#*:}"
-  gated_command="${gated_rest%%:*}"
-  gated_id="${gated_rest#*:}"
-  gated_args=("$gated_id")
+assert_daemon_only() { # assert_daemon_only <unset|blank> <merge|merge-blocked> <id>
+  local gate_value="$1" gated_command="$2" gated_id="$3" OUT STATUS
+  local gated_args=("$gated_id")
   [ "$gated_command" = merge ] || gated_args+=(detail)
   set +e
   if [ "$gate_value" = blank ]; then
@@ -921,7 +916,12 @@ for gated_case in "unset:merge:a1" "blank:merge:a1" \
   [ "$STATUS" -eq 2 ] || fail "$gated_command with $gate_value gate should exit 2, got $STATUS"
   [[ "$(head -n1 <<<"$OUT")" == "DAEMON_ONLY: $gated_command "* ]] \
     || { echo "$OUT"; fail "$gated_command must report DAEMON_ONLY first"; }
-done
+}
+assert_daemon_only unset merge a1
+assert_daemon_only blank merge a1
+assert_daemon_only unset merge-blocked a1
+assert_daemon_only blank merge-blocked a1
+assert_daemon_only unset merge missing-s7
 grep -q ':state :accepted' .swarmforge/squad/assignments/a1/status.edn \
   || fail "refused daemon-only transition changed a1"
 [ "$(wc -l < .swarmforge/squad/events.log)" -eq "$S7_EVENTS_BEFORE" ] \
