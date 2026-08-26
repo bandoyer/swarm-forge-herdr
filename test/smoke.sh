@@ -1999,6 +1999,10 @@ MALFORMED_AGENT_CASES=(
   'nameless member|{"result":{"agents":[{}]}}'
   'non-string name|{"result":{"agents":[{"name":1}]}}'
   'blank name|{"result":{"agents":[{"name":""}]}}'
+  'blank string member|{"result":{"agents":[""]}}'
+  'whitespace-only name|{"result":{"agents":[{"name":" "}]}}'
+  'non-string member|{"result":{"agents":[1]}}'
+  'blank name beside valid label|{"result":{"agents":[{"name":"","label":"WORKER_NAME"}]}}'
   'mixture of valid and malformed members|{"result":{"agents":[{"name":"WORKER_NAME"},{}]}}'
 )
 expect_skip_body() { # expect_skip_body <label> <json>
@@ -2022,6 +2026,14 @@ if grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd
   fail "exact agents:[] must remain authoritative, not herdr-unreachable"
 fi
 ok "exact successful agents:[] remains authoritative"
+printf 'body\n' > "$REC_MODE"
+printf '%s\n' '{"result":{"agents":["alive"]}}' > "$REC_BODY"
+run_squadd_once
+if grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log; then
+  cat .swarmforge/squad/daemon/squadd.log
+  fail "a string agent member must be a usable name, not herdr-unreachable"
+fi
+ok "string agent member is an authoritative observation"
 
 step "squadd: malformed lists after two misses do not move the streak"
 "$TOOL_ROOT/swarmforge/scripts/squad_assign.sh" create a3 implementer instr.md > /dev/null
@@ -2129,6 +2141,29 @@ if grep -q "worker-lost $WAL" .swarmforge/squad/events.log 2>/dev/null; then
   fail "reset via :label must not log worker-lost"
 fi
 ok "herdr agent :label is a live name and resets the streak"
+stop_squadd
+
+step "squadd: a string agent-list member is a live name"
+WAS=r5-implementer-str1
+plant_active "$WAS" str1
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WAS" | grep -q ':active' || fail "string-member setup: two misses must not retire $WAS"
+printf 'body\n' > "$REC_MODE"
+printf '{"result":{"agents":["%s"]}}\n' "$WAS" > "$REC_BODY"
+wait_lists 3
+sleep 0.4
+worker_state "$WAS" | grep -q ':active' || fail "a string member observation must keep $WAS active"
+printf 'missing\n' > "$REC_MODE"
+wait_lists 5
+sleep 0.4
+worker_state "$WAS" | grep -q ':active' || fail "string-member presence must reset the miss streak; two later misses must not retire"
+if grep -q "worker-lost $WAS" .swarmforge/squad/events.log 2>/dev/null; then
+  fail "reset via string member must not log worker-lost"
+fi
+ok "string agent-list member is a live name and resets the streak"
 stop_squadd
 
 step "squadd: miss streaks are independent per worker"
