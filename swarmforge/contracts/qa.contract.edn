@@ -1,0 +1,4 @@
+{:role "qa"
+ :artifact-roots ["test/" "docs/" "PLAN.md"]
+ :required-evidence [{:name "smoke-green" :pattern "(?i)SMOKE PASSED \\(\\d+ checks\\)"}
+                     {:name "spec-verification" :pattern "(?i)specificat|acceptance criteri"}]}

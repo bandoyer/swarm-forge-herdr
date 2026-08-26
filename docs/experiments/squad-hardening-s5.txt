@@ -1,0 +1,7 @@
+Task 'squad-hardening-s5': Implement S5 from docs/squad-hardening.md (dead-worker reconciliation) and nothing else.
+
+S5 only: squadd reconciles :allocated/:active workers against a successful `herdr agent list`; K=3 consecutive successful misses retires the worker through the existing retire path and wakes the leader; never reconcile when herdr is unreachable; add advisor row 14 `report-orphan` (assignment :spawned, no non-retired worker). Do not resume uncommitted work. Do not implement S6, S7, or S8 in this slice.
+
+This is chain start. ready_for_next.sh returning NO_TASK is expected. Write a specification with concrete acceptance criteria covering the herdr-unreachable rule, the K-counter, :allocated grace, row 14, and smoke checks. Then hand the spec off. Specifier does not implement.
+
+Keep the slice inside docs/, swarmforge/scripts/, bin/, and test/. Protocol tokens, exit codes, and file formats stay compatible. Edit prompts/ as source of truth and sync installed copies when a role prompt must change. Smoke must stay green.

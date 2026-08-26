@@ -1,0 +1,3 @@
+{:role "cleaner"
+ :artifact-roots ["swarmforge/scripts/" "bin/" "test/" "prompts/" "packs/" "toolsets/" "docs/" "PLAN.md" "PORTING.md" "README.md"]
+ :required-evidence [{:name "smoke-green" :pattern "(?i)SMOKE PASSED \\(\\d+ checks\\)"}]}
