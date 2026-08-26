@@ -104,9 +104,10 @@
            "cd to the registered worktree and retry."))))
 
 ;; ---------------------------------------------------------------------------
-;; Role contracts (squad v2, S1) — optional per-role law: which paths a
-;; role may author and what evidence its commits must carry. Absent
-;; contract = no enforcement, so adoption is progressive.
+;; Role contracts — optional per-role law: which paths a role may author,
+;; what evidence its commits must carry, and (S7) whether git_handoffs are
+;; restricted to recorded worker-result identities. Absent contract = no
+;; enforcement, so adoption is progressive.
 
 (defn role-contract
   "Contract for a role. Transient squad workers have generated names, so
@@ -134,28 +135,8 @@
     (when (zero? exit)
       (vec (remove str/blank? (str/split-lines out))))))
 
-(defn contract-violations
-  "Errors for a git_handoff commit under the sender's contract, or [] —
-  checks authored paths against :artifact-roots and the commit message
-  against :required-evidence patterns. Merge commits (>1 parent) are
-  integration, not authorship, and are skipped."
-  [role-name commit]
-  (if-let [{:keys [artifact-roots required-evidence]} (role-contract role-name)]
-    (let [parents (git-lines "git" "rev-list" "--parents" "-n" "1" commit)
-          merge? (> (count (str/split (or (first parents) "") #" ")) 2)
-          paths (when-not merge?
-                  (git-lines "git" "diff-tree" "--no-commit-id" "--name-only" "-r" commit))
-          message (str/join "\n" (or (git-lines "git" "log" "-1" "--format=%B" commit) []))
-          allowed? (fn [path] (some #(or (= path %) (str/starts-with? path %)) artifact-roots))
-          path-errors (for [path paths :when (not (allowed? path))]
-                        (format "Contract: '%s' is outside role %s's artifact roots (%s)."
-                                path role-name (str/join ", " artifact-roots)))
-          evidence-errors (for [{:keys [name pattern]} required-evidence
-                                :when (not (re-find (re-pattern pattern) message))]
-                            (format "Contract: required evidence '%s' not found in the commit message (expected to match: %s). Run the tool and record the real result in the commit message."
-                                    name pattern))]
-      (vec (concat path-errors evidence-errors)))
-    []))
+(defn- resolved-commit [commit]
+  (git-line "git" "rev-parse" "--verify" (str commit "^{commit}")))
 
 ;; ---------------------------------------------------------------------------
 ;; Timestamps
@@ -186,6 +167,60 @@
   ([file field] (header-field file field nil))
   ([file field default]
    (get (:headers (parse-handoff file)) field default)))
+
+(defn- recorded-result-commits
+  "Full commit ids from stored assignment results that resolve in the
+  sender's current worktree. Missing and unresolvable headers are ignored."
+  []
+  (let [assignments (fs/path (project-root) ".swarmforge" "squad" "assignments")]
+    (into #{}
+          (keep (fn [assignment]
+                  (let [result (fs/path assignment "result.handoff")]
+                    (when (fs/regular-file? result)
+                      (some-> (header-field result "commit") resolved-commit)))))
+          (if (fs/exists? assignments)
+            (filter fs/directory? (fs/list-dir assignments))
+            []))))
+
+(defn- rework-only-violations
+  "Errors when :forbid-git-handoff is set and commit is not a recorded
+  worker-result identity."
+  [role-name commit]
+  (if (contains? (recorded-result-commits) (resolved-commit commit))
+    []
+    [(format "Contract: role %s's contract forbids handing off new commits; only a worker's recorded result commit may be re-sent."
+             role-name)]))
+
+(defn- authorship-violations
+  "Authored-path and required-evidence errors. Merge commits (>1 parent)
+  are integration, not authorship, and are skipped."
+  [role-name commit {:keys [artifact-roots required-evidence]}]
+  (let [parents (git-lines "git" "rev-list" "--parents" "-n" "1" commit)
+        merge? (> (count (str/split (or (first parents) "") #" ")) 2)
+        paths (when-not merge?
+                (git-lines "git" "diff-tree" "--no-commit-id" "--name-only" "-r" commit))
+        message (str/join "\n" (or (git-lines "git" "log" "-1" "--format=%B" commit) []))
+        allowed? (fn [path] (some #(or (= path %) (str/starts-with? path %)) artifact-roots))
+        path-errors (for [path paths :when (not (allowed? path))]
+                      (format "Contract: '%s' is outside role %s's artifact roots (%s)."
+                              path role-name (str/join ", " artifact-roots)))
+        evidence-errors (for [{:keys [name pattern]} required-evidence
+                              :when (not (re-find (re-pattern pattern) message))]
+                          (format "Contract: required evidence '%s' not found in the commit message (expected to match: %s). Run the tool and record the real result in the commit message."
+                                  name pattern))]
+    (vec (concat path-errors evidence-errors))))
+
+(defn contract-violations
+  "Errors for a git_handoff commit under the sender's contract, or [].
+  :forbid-git-handoff permits only recorded worker-result identities and
+  fails before authorship checks. Ordinary contracts keep checking
+  authored paths and evidence."
+  [role-name commit]
+  (if-let [contract (role-contract role-name)]
+    (if (:forbid-git-handoff contract)
+      (rework-only-violations role-name commit)
+      (authorship-violations role-name commit contract))
+    []))
 
 (def header-order
   ["id" "from" "to" "recipient" "priority" "type" "role" "commit" "message"

@@ -11,8 +11,9 @@
 ;; rejected and merge-blocked as the review/merge failure exits. This tool
 ;; owns created/spawned/result/accepted/rejected and replacement links; the
 ;; `merge` and `merge-blocked` subcommands are daemon-only (squadd, S3) —
-;; nothing but the daemon moves an assignment past accepted. Illegal
-;; transitions exit 2 with an INVALID_TRANSITION token.
+;; they die 2 DAEMON_ONLY unless SWARMFORGE_SQUADD is presented, so nothing
+;; but the daemon moves an assignment past accepted. Illegal transitions
+;; exit 2 with an INVALID_TRANSITION token.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
@@ -118,10 +119,23 @@
   (transition! id :rejected {:extra {:reason reason}
                              :detail (str "reason=" reason)}))
 
+(defn- daemon-gate-presented?
+  "True when SWARMFORGE_SQUADD is set to a non-blank value."
+  []
+  (not (str/blank? (System/getenv "SWARMFORGE_SQUADD"))))
+
+(defn- require-daemon! [subcommand]
+  (when-not (daemon-gate-presented?)
+    (handoff-lib/die 2
+                     (str "DAEMON_ONLY: " subcommand
+                          " is daemon-only; squadd applies accepted verdicts itself"))))
+
 (defn merge! [id]
+  (require-daemon! "merge")
   (transition! id :merged {}))
 
 (defn merge-blocked! [id detail]
+  (require-daemon! "merge-blocked")
   (transition! id :merge-blocked {:extra {:reason detail}
                                   :detail (str "detail=" detail)}))
 

@@ -104,9 +104,14 @@
 ;; --- shelling out ----------------------------------------------------------
 
 (defn- sh
-  "Run argv from the project root; return the result without dying."
+  "Run argv from the project root as the daemon; return the result without
+  dying. Child assignment transitions use this environment as their
+  mechanical-ownership gate."
   [& argv]
-  (apply process/sh {:continue true :dir (str project-root)} argv))
+  (apply process/sh {:continue true
+                     :dir (str project-root)
+                     :extra-env {"SWARMFORGE_SQUADD" "1"}}
+         argv))
 
 (defn- bb-script [script & args]
   (apply sh "bb" (str (fs/path scripts-dir script)) args))

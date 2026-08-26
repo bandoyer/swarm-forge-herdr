@@ -33,7 +33,8 @@ pids/logs. `.worktrees/` — one per role/worker.
   (1 = can't run here, 2 = protocol violation), file formats, script
   names. Upstream prompts must run unmodified.
 - Only `squadd` merges to main in squad mode; only the daemon spawns and
-  retires. The leader touches records only.
+  retires. The leader touches records only. `merge`/`merge-blocked` die 2
+  `DAEMON_ONLY` without `SWARMFORGE_SQUADD=1`.
 - The advisor is read-only and deterministic; every action it can emit
   is in the 14-row table (docs/squad-s3.md rows 1-10, docs/squad-s4.md
   rows 11-13, docs/squad-hardening-s5-spec.md row 14).
@@ -71,7 +72,7 @@ pin `cd` explicitly (session cwd resets) and accept states idle OR done.
   approval the project requires, then integrate and push.
 - Design-first: substantial features get a docs/ design before code.
 - Test env escapes: `SWARMFORGE_WAKE_CMD=none`, `SWARMFORGE_NO_AGENT=1`,
-  `SWARM_BIN=<path>`, `--once` on both daemons.
+  `SWARMFORGE_SQUADD=1`, `SWARM_BIN=<path>`, `--once` on both daemons.
 - Commits: plain succinct subjects, no role prefixes/tags, no trailers,
   evidence in the body.
 

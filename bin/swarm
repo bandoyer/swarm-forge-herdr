@@ -322,7 +322,8 @@
 
 (def squadd-daemon
   {:name "squadd" :dir (fs/path state-dir "squad" "daemon")
-   :env {"SWARM_BIN" (str (fs/path tool-root "bin" "swarm"))}})
+   :env {"SWARM_BIN" (str (fs/path tool-root "bin" "swarm"))
+         "SWARMFORGE_SQUADD" "1"}})
 
 (defn daemon-pid [{:keys [dir name]}]
   (let [pid-file (fs/path dir (str name ".pid"))]
@@ -831,6 +832,9 @@
               (fs/path project-root "swarmforge" "worker-common.prompt"))
     (install! (fs/path prompts "roles" "squad-leader.prompt")
               (fs/path project-root "swarmforge" "roles" "squad-leader.prompt"))
+    (install! (fs/path prompts "contracts" "squad-leader.contract.edn")
+              (fs/path project-root "swarmforge" "contracts"
+                       "squad-leader.contract.edn"))
     (ensure-gitignore!)
     (prepare-worktree! leader-name (str project-root))
     ;; leader row plus any surviving worker rows from a previous session

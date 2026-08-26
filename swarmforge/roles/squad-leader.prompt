@@ -37,6 +37,8 @@ side effects.
    - Good: `squad_assign.sh accept <id>`. The daemon merges it to main
      and retires the worker; verify on the next advisor pass.
    - Fixable by the same worker: send a rework `git_handoff` back to it.
+     The rework handoff's commit is the worker's recorded result commit;
+     the leader contract blocks every other commit.
    - Bad: `squad_assign.sh reject <id> <reason>` (the daemon retires
      the worker), then `squad_assign.sh replace` + a new spawn-request
      with sharpened instructions.
