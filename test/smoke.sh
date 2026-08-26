@@ -1090,6 +1090,13 @@ grep -q ':agent-kind "claude"' ".swarmforge/squad/workers/$WORKER.edn" \
 [ "$(roles_tsv_kind "$WORKER")" = "claude" ] \
   || fail "default spawn roles.tsv kind must be claude"
 ok "default spawn stores and registers claude kind"
+# Public allocation always writes :agent-kind, so exercise the launcher
+# reader directly with the only shape a pre-S6 worker record can have.
+printf '{:name "legacy-worker", :template "implementer", :assignment "legacy", :state :retired}\n' \
+  > .swarmforge/squad/workers/legacy-worker.edn
+OUT="$(bb -e "(binding [*command-line-args* [\"squad\" \"status\"]] (load-file \"$SWARM\")) (println \"LEGACY_KIND:\" ((ns-resolve 'swarm 'worker-agent-kind) \"legacy-worker\"))")"
+expect "pre-S6 worker record falls back to claude" "LEGACY_KIND: claude" <<<"$OUT"
+rm .swarmforge/squad/workers/legacy-worker.edn
 OUT="$("$SCRIPTS/squad_assign.sh" status sp1)"
 expect "assignment moved to spawned" "STATE: spawned" <<<"$OUT"
 set +e
