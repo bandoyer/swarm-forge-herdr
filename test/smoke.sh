@@ -1148,8 +1148,30 @@ OUT="$("$SWARM" squad spawn sp3 implementer grok --no-agent)"
 EXPLICIT_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
 grep -q ':agent-kind "grok"' ".swarmforge/squad/workers/$EXPLICIT_WORKER.edn" \
   || fail "explicit spawn worker record missing grok kind"
-ok "explicit spawn kind reaches worker allocation"
+[ "$(roles_tsv_kind "$EXPLICIT_WORKER")" = "grok" ] \
+  || fail "explicit spawn roles.tsv kind must be grok"
+ok "explicit spawn kind reaches worker allocation and routing"
 "$SWARM" squad retire "$EXPLICIT_WORKER" done --no-agent > /dev/null
+"$SCRIPTS/squad_assign.sh" create sp4 implementer kind.md > /dev/null
+printf 'worker_kind bad!\n' > swarmforge/squad.conf
+OUT="$("$SWARM" squad spawn sp4 implementer --no-agent)"
+FALLBACK_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+grep -q ':agent-kind "claude"' ".swarmforge/squad/workers/$FALLBACK_WORKER.edn" \
+  || fail "invalid worker_kind must fall through to claude, not store the bad token"
+[ "$(roles_tsv_kind "$FALLBACK_WORKER")" = "claude" ] \
+  || fail "invalid worker_kind fallthrough must register claude in roles.tsv"
+ok "invalid worker_kind falls through to claude"
+"$SWARM" squad retire "$FALLBACK_WORKER" done --no-agent > /dev/null
+rm swarmforge/squad.conf
+"$SCRIPTS/squad_assign.sh" create sp5 implementer kind.md > /dev/null
+OUT="$("$SWARM" squad spawn sp5 implementer gpt-4.1 --no-agent)"
+SHAPE_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+grep -q ':agent-kind "gpt-4.1"' ".swarmforge/squad/workers/$SHAPE_WORKER.edn" \
+  || fail "hyphenated dotted kind must be stored on the worker record"
+[ "$(roles_tsv_kind "$SHAPE_WORKER")" = "gpt-4.1" ] \
+  || fail "hyphenated dotted kind must reach roles.tsv"
+ok "kind shape allows hyphen, dot, and digit"
+"$SWARM" squad retire "$SHAPE_WORKER" done --no-agent > /dev/null
 rm -f kind.md
 
 step "spawn-request: create/list/drop lifecycle"
@@ -1653,6 +1675,24 @@ ok "worker registered"
 grep -q ' d1 squadd-spawn template=implementer kind=codex' .swarmforge/squad/events.log \
   || fail "squadd-spawn event missing request kind"
 ok "squadd-spawn logs request kind"
+"$SCRIPTS/squad_assign.sh" create d1conf implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create d1conf implementer > /dev/null
+if grep -q ':kind' .swarmforge/squad/spawn-requests/d1conf.edn; then
+  fail "two-argument daemon request must not add a kind key"
+fi
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+WCONF=squadproj-implementer-d1conf
+grep -q ':agent-kind "grok"' ".swarmforge/squad/workers/$WCONF.edn" \
+  || fail "two-argument request must honor configured worker_kind"
+[ "$(roles_tsv_kind "$WCONF")" = "grok" ] \
+  || fail "two-argument request configured kind did not reach roles.tsv"
+ok "two-argument spawn request uses configured worker_kind"
+grep -q ' d1conf squadd-spawn template=implementer$' .swarmforge/squad/events.log \
+  || fail "squadd-spawn without request kind must keep the original detail"
+if grep -q ' d1conf squadd-spawn template=implementer kind=' .swarmforge/squad/events.log; then
+  fail "squadd-spawn must not append kind= when the request carried none"
+fi
+ok "squadd-spawn without request kind keeps the original detail"
 rm swarmforge/squad.conf
 
 step "squadd: merge pass (accepted result lands on main)"
@@ -1700,6 +1740,9 @@ W2=squadproj-implementer-d2
 W3=squadproj-implementer-d3
 { [ -d ".worktrees/$W2" ] && [ -d ".worktrees/$W3" ]; } || fail "both workers should spawn in one pass"
 ok "both workers spawned in one pass"
+grep -q ':agent-kind "claude"' ".swarmforge/squad/workers/$W2.edn" \
+  || fail "two-argument daemon spawn with no worker_kind must default to claude"
+ok "daemon two-argument spawn defaults to claude"
 play_worker "$W2" d2 "d2 version"
 play_worker "$W3" d3 "d3 version"
 bb "$SCRIPTS/handoffd.bb" "$SQ" --once
