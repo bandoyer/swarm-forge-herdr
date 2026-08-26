@@ -4,8 +4,8 @@
 ;;
 ;; A spawn-request is the leader asking the daemon to spawn a worker for a
 ;; :created assignment: .swarmforge/squad/spawn-requests/<assignment-id>.edn
-;; holding {:assignment :template :requested-at}. This tool creates, lists,
-;; and drops requests; the daemon (slice B) consumes — deletes — a request
+;; holding {:assignment :template :requested-at} plus an optional :kind.
+;; This tool creates, lists, and drops requests; the daemon consumes a request
 ;; when it spawns. Requests for missing or non-:created assignments are
 ;; refused with exit 2, so a stale request can only arise from lifecycle
 ;; movement after the fact, which the advisor then reports as
@@ -19,7 +19,7 @@
 
 (def usage-text
   (str "Usage: squad_spawn_request.sh <subcommand> ...\n\n"
-       "  create <assignment-id> <template>\n"
+       "  create <assignment-id> <template> [kind]\n"
        "  list\n"
        "  drop <assignment-id>"))
 
@@ -34,7 +34,9 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn create! [assignment-id template]
+(defn create! [assignment-id template kind]
+  (when (and kind (not (squad-lib/valid-agent-kind? kind)))
+    (handoff-lib/die 2 (str "INVALID_KIND: " kind)))
   (let [file (request-file assignment-id)
         status-file (squad-lib/status-file assignment-id)]
     ;; Templates become audit-log detail and, in slice B, daemon spawn
@@ -57,13 +59,16 @@
         (handoff-lib/die 2 (format "ASSIGNMENT_NOT_CREATED: '%s' is %s; only a created assignment can request a spawn"
                                    assignment-id (name state)))))
     (fs/create-dirs (squad-lib/spawn-requests-dir))
-    ;; Exactly the three fields squad-s3.md specifies; the file's presence
-    ;; or absence is the whole request lifecycle.
-    (spit (str file) (str (pr-str {:assignment assignment-id
-                                   :template template
-                                   :requested-at (handoff-lib/iso-now)})
+    ;; Preserve the original three-field shape unless the leader supplied an
+    ;; override; the file's presence or absence is the request lifecycle.
+    (spit (str file) (str (pr-str (cond-> {:assignment assignment-id
+                                          :template template
+                                          :requested-at (handoff-lib/iso-now)}
+                                   kind (assoc :kind kind)))
                           "\n"))
-    (squad-lib/log-event! assignment-id "spawn-requested" (str "template=" template))
+    (squad-lib/log-event! assignment-id "spawn-requested"
+                          (str "template=" template
+                               (when kind (str " kind=" kind))))
     (println (str "SPAWN_REQUEST_CREATED: " assignment-id))))
 
 (defn list! []
@@ -87,7 +92,9 @@
   (let [[command & params] args
         params (vec params)]
     (case command
-      "create" (if (= 2 (count params)) (apply create! params) (usage-die))
+      "create" (if (<= 2 (count params) 3)
+                 (apply create! (concat params (repeat (- 3 (count params)) nil)))
+                 (usage-die))
       "list" (if (= [] params) (list!) (usage-die))
       "drop" (if (= 1 (count params)) (drop! (first params)) (usage-die))
       (usage-die))))

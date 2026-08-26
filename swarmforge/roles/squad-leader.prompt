@@ -21,8 +21,10 @@ side effects.
 1. Write an instructions file for one worker-sized slice — precise
    inputs, expected outputs, evidence required.
 2. `swarmforge/scripts/squad_assign.sh create <id> <template> <file>`
-3. `swarmforge/scripts/squad_spawn_request.sh create <id> <template>`
-   — the daemon spawns when capacity allows; you will see the worker
+3. `swarmforge/scripts/squad_spawn_request.sh create <id> <template> [kind]`
+   — the optional agent kind defaults to `worker_kind` in
+   `swarmforge/squad.conf`, else `claude`. The daemon spawns when capacity
+   allows; you will see the worker
    appear. Never call `swarm squad spawn` or `retire` yourself.
 4. The worker's result arrives as a handoff: on wake-up, run
    `swarmforge/scripts/ready_for_next.sh` and process it like any task.

@@ -865,20 +865,27 @@
     (println "Squad is up. Talk to the squad-leader pane, or seed it with:")
     (println "  herdr agent prompt" (project-agent-name leader-name) "\"<your request>\"")))
 
-(defn squad-spawn! [assignment-id template no-agent?]
+(defn squad-spawn! [assignment-id template kind no-agent?]
   (when (or (str/blank? assignment-id) (str/blank? template))
-    (die "Usage: swarm squad spawn <assignment-id> <template> [--no-agent]"))
+    (die "Usage: swarm squad spawn <assignment-id> <template> [kind] [--no-agent]"))
   ;; cross-registry validation: the assignment must exist and be spawnable
   (let [status-out (squad-script "squad_assign" "status" assignment-id)
         state (script-token status-out "STATE")]
     (when-not (= "created" state)
       (die (str "Assignment " assignment-id " is '" state "', not 'created'; cannot spawn."))))
-  (let [alloc (squad-script "squad_worker" "allocate" assignment-id template)
+  (let [alloc (apply squad-script "squad_worker" "allocate" assignment-id template
+                     (when kind [kind]))
         worker (or (script-token alloc "WORKER_ALLOCATED")
                    (die "squad_worker allocate returned no worker name:" alloc))
-        path (str (fs/path worktrees-dir worker))]
+        path (str (fs/path worktrees-dir worker))
+        worker-record (edn/read-string
+                       (slurp (str (fs/path state-dir "squad" "workers"
+                                            (str worker ".edn")))))
+        ;; Records allocated before S6 carry no kind; preserve their
+        ;; historical claude behavior rather than re-reading configuration.
+        agent-kind (or (:agent-kind worker-record) "claude")]
     (prepare-worktree! worker path)
-    (write-roles-rows! (conj (roles-rows) (role-row worker worker path worker "claude")))
+    (write-roles-rows! (conj (roles-rows) (role-row worker worker path worker agent-kind)))
     (when-not no-agent?
       (let [workspace-id (or (existing-workspace) (die "No squad workspace; run `swarm squad up` first."))
             tab (herdr "tab" "create" "--workspace" workspace-id
@@ -888,7 +895,7 @@
         (fs/create-dirs (fs/path state-dir "squad" "herdr"))
         (spit (str (fs/path state-dir "squad" "herdr" (str worker ".edn")))
               (pr-str {:tab-id (find-id tab "tab") :pane-id pane-id}))
-        (herdr "agent" "start" worker "--kind" "claude" "--pane" pane-id)
+        (herdr "agent" "start" worker "--kind" agent-kind "--pane" pane-id)
         (herdr "agent" "prompt" worker
                (str "You are transient squad worker '" worker "' (template: " template "). "
                     "Read swarmforge/worker-common.prompt"
@@ -970,14 +977,14 @@
         no-agent? (contains? flags "--no-agent")]
     (case (first args)
       "up" (squad-up! (second args))
-      "spawn" (squad-spawn! (second args) (nth args 2 nil) no-agent?)
+      "spawn" (squad-spawn! (second args) (nth args 2 nil) (nth args 3 nil) no-agent?)
       "retire" (squad-retire! (second args) (str/join " " (drop 2 args)) no-agent?)
       "status" (print (squad-script "squad_worker" "list"))
       "approvals" (print (squad-script "squad_approval" "list"))
       "approve" (print (apply squad-script "squad_approval" "approve" (rest args)))
       "deny" (print (apply squad-script "squad_approval" "reject" (rest args)))
       "report" (squad-report! (second args))
-      (die "Usage: swarm squad [up [kind] | spawn <id> <template> | retire <worker> [reason] | status | approvals | approve <id> [detail] | deny <id> <reason> | report [theme]]"))))
+      (die "Usage: swarm squad [up [kind] | spawn <id> <template> [kind] | retire <worker> [reason] | status | approvals | approve <id> [detail] | deny <id> <reason> | report [theme]]"))))
 
 (defn -main [args]
   (case (first args)

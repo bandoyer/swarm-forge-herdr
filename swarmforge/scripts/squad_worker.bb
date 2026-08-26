@@ -17,7 +17,7 @@
 
 (def usage-text
   (str "Usage: squad_worker.sh <subcommand> ...\n\n"
-       "  allocate <assignment-id> <template>\n"
+       "  allocate <assignment-id> <template> [kind]\n"
        "  activate <worker-name>\n"
        "  retire <worker-name> [reason...]\n"
        "  list [--active]"))
@@ -73,8 +73,11 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn allocate! [assignment-id template]
-  (let [project-name (fs/file-name (handoff-lib/project-root))
+(defn allocate! [assignment-id template explicit-kind]
+  (when (and explicit-kind (not (squad-lib/valid-agent-kind? explicit-kind)))
+    (handoff-lib/die 2 (str "INVALID_KIND: " explicit-kind)))
+  (let [agent-kind (or explicit-kind (squad-lib/worker-kind))
+        project-name (fs/file-name (handoff-lib/project-root))
         worker (worker-name project-name template assignment-id)
         file (worker-file worker)
         cap (squad-lib/max-transient-agents)]
@@ -87,10 +90,12 @@
     (squad-lib/write-record! file {:name worker
                                    :template template
                                    :assignment assignment-id
+                                   :agent-kind agent-kind
                                    :state :allocated
                                    :created-at (handoff-lib/iso-now)})
     (squad-lib/log-event! worker "allocated"
-                          (str "template=" template " assignment=" assignment-id))
+                          (str "template=" template " assignment=" assignment-id
+                               " kind=" agent-kind))
     (println (str "WORKER_ALLOCATED: " worker))))
 
 (defn activate! [worker-name]
@@ -119,7 +124,9 @@
   (let [[command & params] args
         params (vec params)]
     (case command
-      "allocate" (if (= 2 (count params)) (apply allocate! params) (usage-die))
+      "allocate" (if (<= 2 (count params) 3)
+                   (apply allocate! (concat params (repeat (- 3 (count params)) nil)))
+                   (usage-die))
       "activate" (if (= 1 (count params)) (activate! (first params)) (usage-die))
       "retire" (if (<= 1 (count params))
                  (retire! (first params) (str/join " " (rest params)))

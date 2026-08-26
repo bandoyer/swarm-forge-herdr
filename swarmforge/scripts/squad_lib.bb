@@ -130,6 +130,25 @@
   []
   (conf-int "max_transient_agents" 10))
 
+(defn valid-agent-kind?
+  "True when kind is safe as a herdr CLI argument, roles.tsv field, and
+  event-log value."
+  [kind]
+  (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" (str kind))))
+
+(defn worker-kind
+  "Configured transient-worker kind; claude when squad.conf has no valid
+  worker_kind setting. Leader kind is intentionally unrelated."
+  []
+  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")
+        line-re #"\s*worker_kind\s+(\S+)\s*"]
+    (or (when (fs/exists? file)
+          (some (fn [line]
+                  (when-let [[_ kind] (re-matches line-re line)]
+                    (when (valid-agent-kind? kind) kind)))
+                (str/split-lines (slurp (str file)))))
+        "claude")))
+
 (defn require-approval?
   "True when squad.conf carries a 'require_approval <gate>' line — the S4
   human gate: the daemon may not apply the gated action until an :approved
