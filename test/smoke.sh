@@ -28,15 +28,17 @@ diff -u "$TOOL_ROOT/CLAUDE.md" "$TOOL_ROOT/AGENTS.md" \
   || fail "CLAUDE.md and AGENTS.md drifted; Grok discovers both"
 ok "Claude, Codex, and Grok receive the same repository operations guide"
 for guide in AGENTS.md CLAUDE.md; do
-  grep -qF '10+3' "$TOOL_ROOT/$guide" \
+  # Flatten wrapping so "squad-s4.md" + newline + "rows 11-13" still binds.
+  guide_text="$(tr -s '[:space:]' ' ' < "$TOOL_ROOT/$guide")"
+  grep -qF '10+3' <<<"$guide_text" \
     && fail "$guide still claims the 10+3-row advisor table is exhaustive"
-  grep -q '14-row' "$TOOL_ROOT/$guide" \
+  grep -q '14-row' <<<"$guide_text" \
     || fail "$guide must describe the complete 14-row advisor table"
-  grep -q 'squad-s3.md' "$TOOL_ROOT/$guide" \
+  grep -qE 'squad-s3\.md rows 1[-–]10' <<<"$guide_text" \
     || fail "$guide must cite docs/squad-s3.md for rows 1-10"
-  grep -q 'squad-s4.md' "$TOOL_ROOT/$guide" \
+  grep -qE 'squad-s4\.md rows 11[-–]13' <<<"$guide_text" \
     || fail "$guide must cite docs/squad-s4.md for rows 11-13"
-  grep -q 'squad-hardening-s5-spec.md' "$TOOL_ROOT/$guide" \
+  grep -qE 'squad-hardening-s5-spec\.md row 14' <<<"$guide_text" \
     || fail "$guide must cite docs/squad-hardening-s5-spec.md for row 14"
 done
 ok "session guides describe the complete 14-row advisor table"
