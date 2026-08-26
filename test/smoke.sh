@@ -1770,9 +1770,11 @@ cp -r "$TOOL_ROOT/swarmforge/scripts" "$REC/swarmforge/scripts"
 export REC_CALLS="$REC/herdr-calls.log"
 export REC_MODE="$REC/herdr-mode"
 export REC_AGENTS="$REC/herdr-agents.txt"
+export REC_BODY="$REC/herdr-body.json"
 : > "$REC_CALLS"
 printf 'missing\n' > "$REC_MODE"
 : > "$REC_AGENTS"
+: > "$REC_BODY"
 cat > "$REC_BIN/herdr" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -1787,6 +1789,10 @@ case "${1-} ${2-}" in
         ;;
       unusable)
         printf 'not-a-list\n'
+        exit 0
+        ;;
+      body)
+        cat "$REC_BODY"
         exit 0
         ;;
       present|present-label)
@@ -1861,7 +1867,7 @@ start_squadd() {
     SWARM_BIN="$TOOL_ROOT/bin/swarm" \
     SWARMFORGE_NO_AGENT=1 \
     SWARMFORGE_WAKE_CMD="$REC/fake-wake" \
-    REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" \
+    REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" REC_BODY="$REC_BODY" \
     bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" > "$REC/squadd.out" 2>&1 &
   SQUADDPID=$!
 }
@@ -1977,11 +1983,97 @@ PATH="$REC_BIN:$PATH" \
   SWARM_BIN="$TOOL_ROOT/bin/swarm" \
   SWARMFORGE_NO_AGENT=1 \
   SWARMFORGE_WAKE_CMD=none \
-  REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" \
+  REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" REC_BODY="$REC_BODY" \
   bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" --once
 grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
   || { cat .swarmforge/squad/daemon/squadd.log; fail "unusable list should log herdr-unreachable"; }
 ok "unusable agent list is treated as herdr-unreachable"
+
+run_squadd_once() {
+  mkdir -p .swarmforge/squad/daemon
+  rm -f .swarmforge/squad/daemon/stop
+  : > .swarmforge/squad/daemon/squadd.log
+  PATH="$REC_BIN:$PATH" \
+    SWARM_BIN="$TOOL_ROOT/bin/swarm" \
+    SWARMFORGE_NO_AGENT=1 \
+    SWARMFORGE_WAKE_CMD=none \
+    REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" REC_BODY="$REC_BODY" \
+    bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" --once
+}
+expect_skip_body() { # expect_skip_body <label> <json>
+  printf 'body\n' > "$REC_MODE"
+  printf '%s\n' "$2" > "$REC_BODY"
+  run_squadd_once
+  grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
+    || { cat .swarmforge/squad/daemon/squadd.log; fail "$1 should log herdr-unreachable"; }
+  ok "$1 fails closed as herdr-unreachable"
+}
+
+step "squadd: malformed agent collections fail closed (unusable-response matrix)"
+expect_skip_body "missing agents collection" '{"result":{}}'
+expect_skip_body "agents is not a collection" '{"result":{"agents":{"name":"x"}}}'
+expect_skip_body "nameless member" '{"result":{"agents":[{}]}}'
+expect_skip_body "non-string name" '{"result":{"agents":[{"name":1}]}}'
+expect_skip_body "blank name" '{"result":{"agents":[{"name":""}]}}'
+expect_skip_body "mixture of valid and malformed members" \
+  '{"result":{"agents":[{"name":"alive"},{}]}}'
+printf 'missing\n' > "$REC_MODE"
+run_squadd_once
+if grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log; then
+  cat .swarmforge/squad/daemon/squadd.log
+  fail "exact agents:[] must remain authoritative, not herdr-unreachable"
+fi
+ok "exact successful agents:[] remains authoritative"
+
+step "squadd: malformed lists after two misses do not move the streak"
+"$TOOL_ROOT/swarmforge/scripts/squad_assign.sh" create a3 implementer instr.md > /dev/null
+OUT="$("$TOOL_ROOT/bin/swarm" squad spawn a3 implementer --no-agent)"
+WA3="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WA3" | grep -q ':active' || fail "a3 should still be active after two misses"
+BASE_SKIPS=$(grep -c 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log || true)
+assert_still_active_after_body() { # assert_still_active_after_body <label> <json>
+  local before after
+  before=$(list_count)
+  printf 'body\n' > "$REC_MODE"
+  printf '%s\n' "$2" > "$REC_BODY"
+  wait_lists $((before + 1))
+  sleep 0.4
+  worker_state "$WA3" | grep -q ':active' \
+    || { cat .swarmforge/squad/daemon/squadd.log; fail "$1 must not retire $WA3"; }
+  grep -q "^$WA3	" .swarmforge/roles.tsv || fail "$1 must keep routing for $WA3"
+  [ -d ".worktrees/$WA3" ] || fail "$1 must keep the worktree for $WA3"
+  if grep -q "worker-lost $WA3" .swarmforge/squad/events.log 2>/dev/null; then
+    fail "$1 must not log worker-lost"
+  fi
+  after=$(grep -c 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log || true)
+  [ "$after" -gt "$BASE_SKIPS" ] || {
+    cat .swarmforge/squad/daemon/squadd.log
+    fail "$1 should log reconcile-skipped herdr-unreachable"
+  }
+  BASE_SKIPS=$after
+  ok "$1 leaves artifacts and the miss streak unchanged"
+}
+assert_still_active_after_body "missing agents collection" '{"result":{}}'
+assert_still_active_after_body "agents is not a collection" '{"result":{"agents":{"name":"x"}}}'
+assert_still_active_after_body "nameless member" '{"result":{"agents":[{}]}}'
+assert_still_active_after_body "non-string name" '{"result":{"agents":[{"name":1}]}}'
+assert_still_active_after_body "blank name" '{"result":{"agents":[{"name":""}]}}'
+assert_still_active_after_body "mixture including the live worker name" \
+  "{\"result\":{\"agents\":[{\"name\":\"$WA3\"},{}]}}"
+printf 'missing\n' > "$REC_MODE"
+wait_lists $(( $(list_count) + 1 ))
+sleep 0.8
+worker_state "$WA3" | grep -q ':retired' || {
+  cat .swarmforge/squad/daemon/squadd.log
+  cat .swarmforge/squad/workers/"$WA3".edn
+  fail "authoritative empty agents:[] after the unusable matrix should complete the streak"
+}
+ok "empty agents:[] after unusable polls advances the streak and retires"
+stop_squadd
 
 step "squadd: allocated launch grace vs aged allocated K=3"
 YOUNG=r5-implementer-young1

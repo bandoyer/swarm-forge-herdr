@@ -317,21 +317,32 @@
 
 ;; --- dead-worker reconciliation (S5) ---------------------------------------
 
-(defn- agent-record-name [agent]
-  (cond
-    (string? agent) agent
-    (map? agent) (or (:name agent) (:label agent))))
+(defn- agent-record-name
+  "Nonblank string name for one Herdr agent-list member, or nil when the
+  member has no usable name. A string member is itself the name; a map
+  supplies :name or, failing that, :label. Numbers, blank strings, and
+  maps without those fields are unusable — the caller fail-closes the
+  whole observation rather than dropping this member."
+  [agent]
+  (let [n (cond
+            (string? agent) agent
+            (map? agent) (or (:name agent) (:label agent)))]
+    (when (and (string? n) (not (str/blank? n))) n)))
 
 (defn- parse-agent-names
   "Live agent-name set from a successful `herdr agent list` body, or nil
   when the body is not a usable agent list. An empty :agents array is
-  usable and yields #{}."
+  usable and yields #{}. A missing or non-sequential :agents value, or
+  any member that does not resolve to a nonblank string name, is
+  unusable — never a silently filtered partial set."
   [stdout]
   (try
     (let [data (json/parse-string (str/trim (str stdout)) true)
           agents (get-in data [:result :agents])]
       (when (sequential? agents)
-        (set (keep agent-record-name agents))))
+        (let [names (mapv agent-record-name agents)]
+          (when (every? some? names)
+            (set names)))))
     (catch Exception _ nil)))
 
 (defn- observe-agents
