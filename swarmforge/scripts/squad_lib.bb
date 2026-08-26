@@ -1,10 +1,10 @@
 ;; squad_lib.bb — shared squad v2 state helpers (docs/squad-v2.md).
 ;;
 ;; Owns the durable .swarmforge/squad/ layout the squad entry scripts share:
-;; EDN record files, the append-only events.log, the transient-worker cap
-;; from squad.conf, and the validated state-transition step. Loads
-;; handoff_lib.bb itself, so entries load only this file. Defines no side
-;; effects at load time.
+;; EDN record files, the append-only events.log, squad.conf settings
+;; (capacity, worker kind, merger depth, approval gates), and the
+;; validated state-transition step. Loads handoff_lib.bb itself, so
+;; entries load only this file. Defines no side effects at load time.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "handoff_lib.bb")))
 
@@ -112,17 +112,23 @@
   (spit (str file)
         (str (pr-str (assoc record :updated-at (handoff-lib/iso-now))) "\n")))
 
+(defn- squad-conf-lines
+  "Lines of swarmforge/squad.conf; empty when the file is absent."
+  []
+  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")]
+    (if (fs/exists? file)
+      (str/split-lines (slurp (str file)))
+      [])))
+
 (defn- conf-int
   "Integer setting from swarmforge/squad.conf, upstream's format: a line
   '<setting> N'. default when the file or line is absent."
   [setting default]
-  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")
-        line-re (re-pattern (str "\\s*" setting "\\s+(\\d+)\\s*"))]
-    (or (when (fs/exists? file)
-          (some (fn [line]
-                  (when-let [[_ n] (re-matches line-re line)]
-                    (parse-long n)))
-                (str/split-lines (slurp (str file)))))
+  (let [line-re (re-pattern (str "\\s*" setting "\\s+(\\d+)\\s*"))]
+    (or (some (fn [line]
+                (when-let [[_ n] (re-matches line-re line)]
+                  (parse-long n)))
+              (squad-conf-lines))
         default)))
 
 (defn max-transient-agents
@@ -130,24 +136,35 @@
   []
   (conf-int "max_transient_agents" 10))
 
+(defn safe-token?
+  "True when s is safe as a herdr CLI argument, roles.tsv field, and
+  event-log value. Agent kinds and templates share this shape."
+  [s]
+  (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" (str s))))
+
 (defn valid-agent-kind?
   "True when kind is safe as a herdr CLI argument, roles.tsv field, and
   event-log value."
   [kind]
-  (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" (str kind))))
+  (safe-token? kind))
 
-(defn worker-kind
+(defn require-valid-agent-kind!
+  "Die 2 INVALID_KIND when kind is present and not a valid agent kind.
+  Nil is ignored so two-argument callers can pass the absent override
+  through."
+  [kind]
+  (when (and kind (not (valid-agent-kind? kind)))
+    (handoff-lib/die 2 (str "INVALID_KIND: " kind))))
+
+(defn configured-worker-kind
   "Configured transient-worker kind; claude when squad.conf has no valid
   worker_kind setting. Leader kind is intentionally unrelated."
   []
-  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")
-        line-re #"\s*worker_kind\s+(\S+)\s*"]
-    (or (when (fs/exists? file)
-          (some (fn [line]
-                  (when-let [[_ kind] (re-matches line-re line)]
-                    (when (valid-agent-kind? kind) kind)))
-                (str/split-lines (slurp (str file)))))
-        "claude")))
+  (or (some (fn [line]
+              (when-let [[_ kind] (re-matches #"\s*worker_kind\s+(\S+)\s*" line)]
+                (when (valid-agent-kind? kind) kind)))
+            (squad-conf-lines))
+      "claude"))
 
 (defn require-approval?
   "True when squad.conf carries a 'require_approval <gate>' line — the S4
@@ -155,13 +172,10 @@
   approval record exists for its target. No file or no line = no gate =
   pre-S4 behavior (docs/squad-s4.md)."
   [gate]
-  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")
-        line-re (re-pattern (str "\\s*require_approval\\s+"
+  (let [line-re (re-pattern (str "\\s*require_approval\\s+"
                                  (java.util.regex.Pattern/quote (str gate))
                                  "\\s*"))]
-    (boolean (and (fs/exists? file)
-                  (some #(re-matches line-re %)
-                        (str/split-lines (slurp (str file))))))))
+    (boolean (some #(re-matches line-re %) (squad-conf-lines)))))
 
 (defn max-merger-depth
   "How many merger attempts a merge-blocked line of work may consume before

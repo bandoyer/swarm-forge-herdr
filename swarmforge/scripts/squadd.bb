@@ -147,10 +147,8 @@
 
 (defn spawn! [{:keys [target]}]
   (let [request-file (fs/path squad-dir "spawn-requests" (str target ".edn"))
-        request (when (fs/exists? request-file)
-                  (edn/read-string (slurp (str request-file))))
-        template (:template request)
-        kind (:kind request)]
+        {:keys [template kind]} (when (fs/exists? request-file)
+                                  (edn/read-string (slurp (str request-file))))]
     (if (str/blank? (str template))
       (log! "spawn-skipped" target "spawn-request record missing or has no template")
       (let [{:keys [exit] :as result}

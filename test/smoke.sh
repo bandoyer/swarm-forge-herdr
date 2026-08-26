@@ -929,7 +929,7 @@ OUT="$("$SCRIPTS/squad_assign.sh" spawn a3)"
 expect "spawn transition" "ASSIGNMENT_STATE: a3 created -> spawned" <<<"$OUT"
 
 step "squad worker: events.log records worker state changes"
-grep -q ' project-implementer-a1 allocated template=implementer assignment=a1' "$LOG" || { cat "$LOG"; fail "allocate not logged"; }
+grep -q ' project-implementer-a1 allocated template=implementer assignment=a1 kind=claude' "$LOG" || { cat "$LOG"; fail "allocate not logged"; }
 ok "allocate logged"
 grep -q ' project-implementer-a1 active' "$LOG" || { cat "$LOG"; fail "activate not logged"; }
 ok "activate logged"
@@ -1084,9 +1084,10 @@ WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
 ok "worker worktree and queue dirs created"
 grep -q "^$WORKER	" .swarmforge/roles.tsv || fail "worker not registered in roles.tsv"
 ok "worker registered for routing"
+roles_tsv_kind() { awk -F '\t' -v worker="$1" '$1 == worker {print $6}' .swarmforge/roles.tsv; }
 grep -q ':agent-kind "claude"' ".swarmforge/squad/workers/$WORKER.edn" \
   || fail "default spawn worker record missing claude kind"
-[ "$(awk -F '\t' -v worker="$WORKER" '$1 == worker {print $6}' .swarmforge/roles.tsv)" = "claude" ] \
+[ "$(roles_tsv_kind "$WORKER")" = "claude" ] \
   || fail "default spawn roles.tsv kind must be claude"
 ok "default spawn stores and registers claude kind"
 OUT="$("$SCRIPTS/squad_assign.sh" status sp1)"
@@ -1137,7 +1138,7 @@ OUT="$("$SWARM" squad spawn sp2 implementer --no-agent)"
 CONFIGURED_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
 grep -q ':agent-kind "grok"' ".swarmforge/squad/workers/$CONFIGURED_WORKER.edn" \
   || fail "configured worker record missing grok kind"
-[ "$(awk -F '\t' -v worker="$CONFIGURED_WORKER" '$1 == worker {print $6}' .swarmforge/roles.tsv)" = "grok" ] \
+[ "$(roles_tsv_kind "$CONFIGURED_WORKER")" = "grok" ] \
   || fail "configured spawn roles.tsv kind must be grok"
 ok "worker_kind config controls record and routing kind"
 "$SWARM" squad retire "$CONFIGURED_WORKER" done --no-agent > /dev/null
@@ -1642,7 +1643,7 @@ grep -q ':state :active' ".swarmforge/squad/workers/$W1.edn" || fail "worker $W1
 ok "worker active"
 grep -q ':agent-kind "codex"' ".swarmforge/squad/workers/$W1.edn" \
   || fail "request override did not beat configured worker kind"
-[ "$(awk -F '\t' -v worker="$W1" '$1 == worker {print $6}' .swarmforge/roles.tsv)" = "codex" ] \
+[ "$(roles_tsv_kind "$W1")" = "codex" ] \
   || fail "request override did not reach roles.tsv"
 ok "request kind overrides worker_kind through daemon spawn"
 [ ! -e .swarmforge/squad/spawn-requests/d1.edn ] || fail "spawn-request not consumed"

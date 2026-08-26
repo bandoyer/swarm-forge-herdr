@@ -34,15 +34,14 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn create! [assignment-id template kind]
-  (when (and kind (not (squad-lib/valid-agent-kind? kind)))
-    (handoff-lib/die 2 (str "INVALID_KIND: " kind)))
+(defn create! [assignment-id template explicit-kind]
+  (squad-lib/require-valid-agent-kind! explicit-kind)
   (let [file (request-file assignment-id)
         status-file (squad-lib/status-file assignment-id)]
-    ;; Templates become audit-log detail and, in slice B, daemon spawn
-    ;; arguments — gate their shape like assignment ids (reviewer finding,
+    ;; Templates become audit-log detail and daemon spawn arguments —
+    ;; gate their shape like assignment ids (reviewer finding,
     ;; squad-advisor: a newline in the template could forge log lines).
-    (when-not (re-matches #"[A-Za-z0-9][A-Za-z0-9._-]*" (str template))
+    (when-not (squad-lib/safe-token? template)
       (handoff-lib/die 2 (str "INVALID_TEMPLATE: " template)))
     (when (fs/exists? file)
       (handoff-lib/die 2 (str "SPAWN_REQUEST_EXISTS: " assignment-id)))
@@ -64,11 +63,11 @@
     (spit (str file) (str (pr-str (cond-> {:assignment assignment-id
                                           :template template
                                           :requested-at (handoff-lib/iso-now)}
-                                   kind (assoc :kind kind)))
+                                   explicit-kind (assoc :kind explicit-kind)))
                           "\n"))
     (squad-lib/log-event! assignment-id "spawn-requested"
                           (str "template=" template
-                               (when kind (str " kind=" kind))))
+                               (when explicit-kind (str " kind=" explicit-kind))))
     (println (str "SPAWN_REQUEST_CREATED: " assignment-id))))
 
 (defn list! []
@@ -93,7 +92,7 @@
         params (vec params)]
     (case command
       "create" (if (<= 2 (count params) 3)
-                 (apply create! (concat params (repeat (- 3 (count params)) nil)))
+                 (create! (nth params 0) (nth params 1) (nth params 2 nil))
                  (usage-die))
       "list" (if (= [] params) (list!) (usage-die))
       "drop" (if (= 1 (count params)) (drop! (first params)) (usage-die))

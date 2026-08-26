@@ -865,6 +865,15 @@
     (println "Squad is up. Talk to the squad-leader pane, or seed it with:")
     (println "  herdr agent prompt" (project-agent-name leader-name) "\"<your request>\"")))
 
+(defn- worker-agent-kind
+  "Kind stored on the worker record. Pre-S6 records omit the key and
+  read as claude — never re-resolve from squad.conf."
+  [worker]
+  (let [record (edn/read-string
+                (slurp (str (fs/path state-dir "squad" "workers"
+                                     (str worker ".edn")))))]
+    (or (:agent-kind record) "claude")))
+
 (defn squad-spawn! [assignment-id template kind no-agent?]
   (when (or (str/blank? assignment-id) (str/blank? template))
     (die "Usage: swarm squad spawn <assignment-id> <template> [kind] [--no-agent]"))
@@ -878,12 +887,7 @@
         worker (or (script-token alloc "WORKER_ALLOCATED")
                    (die "squad_worker allocate returned no worker name:" alloc))
         path (str (fs/path worktrees-dir worker))
-        worker-record (edn/read-string
-                       (slurp (str (fs/path state-dir "squad" "workers"
-                                            (str worker ".edn")))))
-        ;; Records allocated before S6 carry no kind; preserve their
-        ;; historical claude behavior rather than re-reading configuration.
-        agent-kind (or (:agent-kind worker-record) "claude")]
+        agent-kind (worker-agent-kind worker)]
     (prepare-worktree! worker path)
     (write-roles-rows! (conj (roles-rows) (role-row worker worker path worker agent-kind)))
     (when-not no-agent?
