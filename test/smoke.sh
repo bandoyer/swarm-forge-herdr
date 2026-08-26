@@ -2199,7 +2199,7 @@ if grep -q "worker-lost $WS" .swarmforge/squad/events.log 2>/dev/null; then
 fi
 ok "stale miss streaks are pruned; a reused name starts at zero"
 stop_squadd
-unset SWARMFORGE_NO_AGENT SWARM_BIN REC_CALLS REC_MODE REC_AGENTS
+unset SWARMFORGE_NO_AGENT SWARM_BIN REC_CALLS REC_MODE REC_AGENTS REC_BODY
 cd "$CODER"
 
 step "squad report renders assignments, approvals, events"
