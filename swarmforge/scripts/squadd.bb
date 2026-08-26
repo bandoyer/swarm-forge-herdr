@@ -404,8 +404,13 @@
   unchanged."
   []
   (if-let [live-agent-names (observe-agents)]
-    (doseq [worker (filter reconciliation-candidate? (read-workers))]
-      (reconcile-worker! live-agent-names worker))
+    (let [candidates (filter reconciliation-candidate? (read-workers))]
+      ;; A worker retired through any other path (mechanical rows 6/7,
+      ;; manual retire) must not leave a partial streak behind: the atom
+      ;; holds streaks of current candidates only.
+      (swap! miss-streaks select-keys (mapv :name candidates))
+      (doseq [worker candidates]
+        (reconcile-worker! live-agent-names worker)))
     (log! "reconcile-skipped" "herdr-unreachable")))
 
 ;; --- poll loop --------------------------------------------------------------
