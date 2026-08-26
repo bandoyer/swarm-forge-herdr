@@ -352,6 +352,36 @@ grep -qE '^window .* (grok|codex|claude) (master|none) ' "$FABLE_CONF" \
   && fail "Fable pack should keep every role out of the project root"
 ok "Codex Grok Fable six-pack spends Claude only on architect"
 
+step "mixed Grok Sol Fable six-pack pins three providers"
+MIX_PACK="$WORK/mix-fable-pack"
+mkdir -p "$MIX_PACK"
+git -C "$MIX_PACK" init -qb main
+git -C "$MIX_PACK" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$MIX_PACK" && "$TOOL_ROOT/bin/swarm" init six-mix-fable-review >/dev/null)
+MIX_CONF="$MIX_PACK/swarmforge/swarmforge.conf"
+grep -q '^window specifier grok mix-specifier task --model grok-4.6 --reasoning-effort xhigh ' \
+  "$MIX_CONF" \
+  || fail "mix specifier should pin Grok 4.6 xHigh"
+grep -q '^window coder codex mix-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
+  "$MIX_CONF" \
+  || fail "mix coder should pin Sol High"
+grep -q '^window cleaner grok mix-cleaner batch --model grok-4.6 --reasoning-effort high ' \
+  "$MIX_CONF" \
+  || fail "mix cleaner should pin Grok 4.6 High"
+grep -q '^window architect claude mix-architect batch --model claude-fable-5 --effort high$' \
+  "$MIX_CONF" \
+  || fail "mix architect should pin Fable 5 High"
+grep -q '^window hardener grok mix-hardener batch --model grok-4.6 --reasoning-effort high ' \
+  "$MIX_CONF" \
+  || fail "mix hardener should pin Grok 4.6 High"
+grep -q '^window qa codex mix-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
+  "$MIX_CONF" \
+  || fail "mix QA should pin Sol xHigh"
+grep -qE '^window .* (grok|codex|claude) (master|none) ' "$MIX_CONF" \
+  && fail "mix pack should keep every role out of the project root"
+ok "mixed Grok Sol Fable six-pack pins all three providers"
+
 step "every provider-specific pack initializes from a complete pair"
 for conf in "$TOOL_ROOT"/packs/*.conf; do
   pack="$(basename "$conf" .conf)"
