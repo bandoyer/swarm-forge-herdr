@@ -1,0 +1,7 @@
+Task 'undo': Add Undo to StackCalculator.
+
+One mutating step can be undone. A successful mutating operation (Push, Pop, Add, Sub, Mul, Div, MemoryStore, MemoryRecall, MemoryClear) becomes the thing Undo reverses. Failed operations already leave stack and memory unchanged and must not become undo steps. Read-only operations must not become undo steps. Other existing mutators (Swap, Dup, Negate, Abs, Sum, Clear, Evaluate) are out of scope: they must not create an undo step, and a successful one of those discards any pending undo so a following Undo throws. Undo on a calculator with nothing to undo throws InvalidOperationException and changes nothing. This slice is single-step undo only — no redo, no undo of Undo, no multi-level history.
+
+Write a specification with concrete acceptance criteria covering those rules and the interesting edges (empty stack, stored zero, divide-by-zero, memory vs stack). Then hand the spec off. Specifier does not implement.
+
+Keep the slice inside src/ and tests/. Existing operations keep their current contracts. Do not add persistence, multiple undo levels, or a public history API beyond Undo itself.

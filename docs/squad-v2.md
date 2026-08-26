@@ -2,6 +2,7 @@
 
 > Status: complete — all four phases built and validated live 2026-08-15.
 > Phase details: [S3](squad-s3.md), [S4](squad-s4.md); history in PLAN.md.
+> Follow-on (proposed): [squad hardening S5+](squad-hardening.md).
 
 Port of upstream swarm-forge's `squad` branch to the herdr runtime. Packs
 are assembly lines of fixed peers; squad is a hub: one persistent

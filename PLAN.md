@@ -131,6 +131,19 @@ branches. Design: `docs/pack-retirement.md`.
   **Squad v2 complete.**
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 
+## Phase 6 — Squad hardening + Grok/Codex six-pack (proposed)
+
+Designs, nothing built yet:
+
+- [ ] S5 dead-worker reconciliation (issue #2) — `docs/squad-hardening.md`
+- [ ] S6 worker agent kind is data (unblocks Grok/Codex squad workers)
+- [ ] S7a daemon-only env gate; S7b leader contract
+- [ ] S8 atomic records + stale sequence.lock recovery
+- [x] `six-grok-codex-review` vs `six-codex-grok-review` undo slice —
+      invert won (Sol spec/QA, Grok coder/hardener). Optional
+      `six-codex-grok-fable-review` spends leftover Fable 5 High on
+      architect only. Design: `docs/six-pack-grok-codex.md`.
+
 ## Decisions log
 
 - 2026-08-15: MIT license; Babashka runtime; packs as presets not branches;

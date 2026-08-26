@@ -184,7 +184,9 @@ contract.
 | `six-grok` | `specifier` | Six-role evidence pipeline | Grok; specifier uses root, later roles are isolated |
 | `six-grok-review` | `specifier` | Isolated six-role evidence pipeline | Grok; terminal result requires human integration |
 | `six-codex-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Codex; terminal result requires human integration |
-| `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Grok coder, Codex otherwise; human integration |
+| `six-grok-codex-review` | `specifier` | Isolated six-role evidence pipeline | Grok judges/hardens, Sol codes/QAs; human integration |
+| `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Recommended Grok+Codex: Sol judges/QAs, Grok codes/hardens; human integration |
+| `six-codex-grok-fable-review` | `specifier` | Isolated six-role evidence pipeline | Same, with Fable 5 High as architect; human integration |
 | `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |
 | `six-claude-codex-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-informed Opus and Sol roles; human integration |
 
@@ -216,6 +218,28 @@ It assigns Opus 5 xHigh to specification, architecture, and hardening; Sol
 High to coding; Opus 5 High to cleaning; and Sol xHigh to QA. Hardener and QA
 must execute every project-declared output or security probe. Every role is
 isolated, and the terminal candidate still requires human integration.
+
+Use the Grok-and-Codex evidence pipeline with:
+
+```sh
+swarm init six-grok-codex-review    # new swarm project
+swarm switch six-grok-codex-review  # existing swarm project
+```
+
+It assigns Grok 4.6 xHigh to specification and architecture, Sol High to
+coding, Grok 4.6 High to cleaning and hardening, and Sol xHigh to QA.
+
+The recommended Grok+Codex six-pack after the undo comparison is the
+other way around:
+
+```sh
+swarm init six-codex-grok-review    # new swarm project
+swarm switch six-codex-grok-review  # existing swarm project
+```
+
+Sol xHigh specifies, architects, and QAs; Sol High cleans; Grok 4.6 High
+codes and hardens. Spend leftover Fable 5 on architect only with
+`six-codex-grok-fable-review`. See [Grok + Codex six-pack](docs/six-pack-grok-codex.md).
 
 See [Choosing a mode](docs/choosing-a-mode.md) for the evidence and cost
 tradeoffs: two-pack work ends up *tidy*, adversaries work *attacked*, four-pack
@@ -388,6 +412,8 @@ Deeper reading:
 - [Squad v2](docs/squad-v2.md)
 - [Squad advisor and daemon](docs/squad-s3.md)
 - [Squad approvals](docs/squad-s4.md)
+- [Squad hardening](docs/squad-hardening.md)
+- [Grok + Codex six-pack](docs/six-pack-grok-codex.md)
 - [Porting notes](PORTING.md)
 - [Build history](PLAN.md)
 

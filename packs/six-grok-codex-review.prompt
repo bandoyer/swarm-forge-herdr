@@ -1,4 +1,4 @@
-# Article: Pack (six, Codex and Grok invert, human integration gate)
+# Article: Pack (six, Grok and Codex, human integration gate)
 
 Roles: specifier, coder, cleaner, architect, hardener, qa.
 
@@ -29,7 +29,7 @@ routes back to specifier and the chain runs again.
   each recipient merges it and stops.
 - No role integrates, rebases, or pushes the terminal candidate to the
   project root's protected branch. The operator independently verifies
-  this candidate and the flagship (`six-grok-codex-review`) on the same
+  this candidate and the invert (`six-codex-grok-review`) on the same
   slice, then presents both for human review. Only explicit human
   approval after that comparison can authorize a separate integration
   step.

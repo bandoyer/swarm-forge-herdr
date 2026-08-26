@@ -36,6 +36,12 @@ reviewer has caught durability bugs, log injection, and argv injection.
 Cost: 2 agents; loops until clean, so hard tasks cost more — that's the
 feature.
 
+For a Claude-free six-pack, `six-grok-codex-review` is the proposed mix
+(Grok on spec/clean/architecture/hardening, Sol on code and QA). Pair it
+with `six-codex-grok-review` (the invert: Sol specs, Grok codes) on the
+same slice before treating either as settled — see
+[Grok + Codex six-pack](six-pack-grok-codex.md).
+
 Use `adversaries-codex-review` or `adversaries-grok-review` when a human must
 inspect the terminal candidate before integration. Both roles stay in linked
 worktrees, and the project root remains untouched until the operator integrates

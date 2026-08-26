@@ -18,7 +18,7 @@ is the authoritative history.
 | `packs/*.conf` + `*.prompt` | Pack presets + chain articles |
 | `toolsets/*.edn` | Quality-tool profiles keyed by purpose (dotnet, clojure, ruby, rust) |
 | `test/smoke.sh` | 250+ checks; the executable spec. MUST be green before any commit |
-| `docs/` | Designs: squad-v2/s3/s4, choosing-a-mode, pack retirement |
+| `docs/` | Designs: squad-v2/s3/s4, squad-hardening (proposed S5+), six-pack-grok-codex (proposed), choosing-a-mode, pack retirement |
 | `AGENTS.md`, `CLAUDE.md` | Parallel session guides; keep their shared operational facts synchronized (Grok discovers both) |
 | `PLAN.md`, `PORTING.md` | History; upstream parity vs original work |
 
