@@ -183,15 +183,22 @@ authoritative absent observation is miss one.
 7. Existing advisor determinism/read-only checks and existing daemon
    mechanical, residual-wake, approval, protocol-token, and exit-code
    checks continue to pass.
+8. `AGENTS.md` and `CLAUDE.md` remain byte-for-byte synchronized. Their
+   advisor invariant describes the complete 14-row table: rows 1–10 in
+   `docs/squad-s3.md`, rows 11–13 in `docs/squad-s4.md`, and S5 row 14 in
+   this specification. Neither guide may continue to claim that the
+   10+3 rows are exhaustive.
 
 The completed slice must run `./test/smoke.sh` and end with
 `SMOKE PASSED (N checks)`. Every changed `.bb` entry must also parse.
 
 ## Scope boundaries
 
-- S5 may change only `docs/`, `swarmforge/scripts/`, `bin/`, and `test/`,
-  except for the required source-and-installed squad-leader prompt pair
-  described above.
+- S5 may change only `docs/`, `swarmforge/scripts/`, `bin/`, `test/`,
+  `AGENTS.md`, and `CLAUDE.md`, except for the required
+  source-and-installed squad-leader prompt pair described above. Changes
+  to the two repository session guides are limited to synchronizing their
+  advisor-table invariant with row 14 and must keep the files identical.
 - Do not implement S6 worker kinds, S7 authority gates, or S8 atomic
   records/stale-lock recovery.
 - Do not add a new public command, resume dead-worker work, preserve its
