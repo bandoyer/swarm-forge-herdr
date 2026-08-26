@@ -414,6 +414,7 @@ Deeper reading:
 - [Squad approvals](docs/squad-s4.md)
 - [Squad hardening](docs/squad-hardening.md)
 - [Grok + Codex six-pack](docs/six-pack-grok-codex.md)
+- [Quality bars](docs/quality-bars.md)
 - [Porting notes](PORTING.md)
 - [Build history](PLAN.md)
 

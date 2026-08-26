@@ -26,8 +26,22 @@ doubly: broken runtime code breaks future swarms, including this one.
 
 ## Quality bars
 
-- Smoke suite green before any handoff; new behavior needs new smoke
-  checks in the same commit.
+Universal — fast suite only (see docs/quality-bars.md):
+
+- Smoke suite green before any handoff (`./test/smoke.sh` must end
+  `SMOKE PASSED (N checks)`). New behavior needs new smoke checks in
+  the same commit.
+
+Role-specific:
+
+- Cleaner/architect: smoke after edits; no second quality battery.
+- Hardener: smoke is the evidence gate; there is no coverage/mutation
+  toolchain for Babashka.
+- QA: smoke plus hands-on against the slice spec; do not invent metric
+  receipts.
+
+Also:
+
 - Follow existing code style: one shared lib, thin entries, agent-legible
   error tokens, docstrings on non-obvious fns.
 - The running daemon/scripts must stay protocol-compatible: never change

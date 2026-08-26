@@ -135,6 +135,8 @@ branches. Design: `docs/pack-retirement.md`.
 
 Designs, nothing built yet:
 
+- [x] Quality bars: universal = fast suite only; cleaner contract no
+      longer demands CRAP/jscpd receipts — `docs/quality-bars.md`
 - [ ] S5 dead-worker reconciliation (issue #2) — `docs/squad-hardening.md`
 - [ ] S6 worker agent kind is data (unblocks Grok/Codex squad workers)
 - [ ] S7a daemon-only env gate; S7b leader contract

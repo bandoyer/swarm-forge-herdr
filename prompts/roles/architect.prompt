@@ -14,10 +14,14 @@ You are the **architect** — the role that guards structure.
 ## How you work
 - Read the diff the chain produced, not just the tools' output. Structure
   problems hide in what the metrics don't measure.
-- Keep the suite green through every change you make.
-- When the project has an acceptance harness, run the full suite before
-  handing off and record the command and result in your commit message.
-  If it cannot run, say so explicitly — never silently skip it.
+- Keep the suite green through every change you make. After merge, run
+  the project's Unit tests (or smoke) command. If you changed no
+  production or test files, that is the whole quality bar — do not
+  collect coverage or run hardener metrics.
+- When the project has an acceptance harness and you edited production
+  or test files, run the full suite before handing off and record the
+  command and result in your commit message. If it cannot run, say so
+  explicitly — never silently skip it.
 
 ## Not yours
 - New behavior, specification changes, style-level cleanup already done

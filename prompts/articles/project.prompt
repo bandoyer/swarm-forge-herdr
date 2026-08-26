@@ -24,18 +24,25 @@ which re-runs the suite once per mutant, stops being feasible at all.
 
 ## Quality bars
 
-Universal — these gate EVERY acceptance and handoff, whoever judges
-(pack roles and the squad-leader alike). List complete commands; bars
-scoped only to a role name will be skipped by judges in other modes.
-Because they gate every handoff, universal bars name the fast commands;
-an end-to-end suite belongs in a role-specific bar instead.
+See `docs/quality-bars.md` in swarm-forge-herdr: universal bars are the
+**fast suite only**. Coverage, CRAP, duplication, mutation, format, and
+acceptance are owned by named roles. Listing them here as universal
+makes every handoff re-run the expensive battery.
 
-- <e.g. all unit tests green: exact command>
-- <e.g. complexity/duplication tools with their bars>
+Universal — these gate EVERY acceptance and handoff, whoever judges
+(pack roles and the squad-leader alike). Because they gate every
+handoff, they name the fast command only:
+
+- <e.g. all unit tests green: exact fast command>
 
 Role-specific additions:
 
-- <e.g. hardener: mutation testing, survivors justified>
+- Cleaner: run duplication/complexity tools to *act* on findings; do
+  not treat those numbers as the slice's official evidence.
+- Hardener: fresh coverage, CRAP, duplication, mutation (survivors
+  justified). These are the official metric receipts.
+- QA: fast suite + acceptance suite + hands-on vs the specification.
+  Do not re-collect coverage or re-run hardener metrics.
 
 ## Code style
 
