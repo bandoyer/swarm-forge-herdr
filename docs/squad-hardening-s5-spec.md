@@ -13,6 +13,14 @@ resume anything from a dead worker's worktree.
   command that cannot start, exits nonzero, or does not yield a usable
   agent list is **herdr-unreachable**. A successful empty list is
   authoritative.
+- A usable agent list has an `agents` collection in the existing Herdr
+  response location, and every member resolves to a nonblank string name:
+  either the member itself is a string, or its `name`/compatible `label`
+  field supplies that string. A missing collection, a collection of the
+  wrong type, or any member that has no usable string name makes the
+  entire observation herdr-unreachable. The daemon must not silently
+  drop malformed members and reconcile against the remaining partial
+  list.
 - A **reconciliation candidate** is a worker record in `:active`, or an
   `:allocated` worker whose `:updated-at` is at least 15 seconds old.
   An `:allocated` worker younger than 15 seconds is in its launch grace
@@ -156,7 +164,13 @@ authoritative absent observation is miss one.
 3. A failed or unusable `agent list` after two misses logs
    `reconcile-skipped herdr-unreachable`, changes none of those artifacts,
    and neither advances nor resets the streak; the next successful miss
-   completes the streak.
+   completes the streak. The unusable-response matrix includes a missing
+   `agents` collection, a non-collection value, a nameless member, a
+   non-string or blank name, and a mixture of valid and malformed members.
+   Every case fails closed as one unusable observation; none may be
+   converted to an empty or partially filtered authoritative set. The
+   adjacent control proves that an exact successful `agents: []` remains
+   authoritative and advances the streak.
 4. A young `:allocated` worker survives at least three successful absent
    observations, while an otherwise equivalent `:allocated` record at
    least 15 seconds old retires only on its third successful absence.
