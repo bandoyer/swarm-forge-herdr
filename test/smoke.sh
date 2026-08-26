@@ -375,9 +375,9 @@ git -C "$MIX_PACK" -c user.email=smoke@test -c user.name=smoke \
   commit -q --allow-empty -m "initial"
 (cd "$MIX_PACK" && "$TOOL_ROOT/bin/swarm" init six-mix-fable-review >/dev/null)
 MIX_CONF="$MIX_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier grok mix-specifier task --model grok-4.6 --reasoning-effort xhigh ' \
+grep -q '^window specifier claude mix-specifier task --model claude-fable-5 --effort high$' \
   "$MIX_CONF" \
-  || fail "mix specifier should pin Grok 4.6 xHigh"
+  || fail "mix specifier should pin Fable 5 High"
 grep -q '^window coder codex mix-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
   "$MIX_CONF" \
   || fail "mix coder should pin Sol High"

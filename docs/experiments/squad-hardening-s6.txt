@@ -1,0 +1,9 @@
+Task 'squad-hardening-s6': Implement S6 from docs/squad-hardening.md (worker agent kind is data) and nothing else.
+
+S6 only: spawn records the agent kind; the launcher honors it. swarmforge/squad.conf gains worker_kind <kind> (default claude, matching today's behavior). squad_spawn_request may override per assignment (create <id> <template> [kind]). The worker EDN record stores :agent-kind. squad-spawn! starts --kind from the record, not the literal "claude". swarm squad up <kind> continues to set only the leader kind. Smoke: a --no-agent spawn with worker_kind grok writes :agent-kind "grok" and the roles.tsv kind column; default remains claude.
+
+Do not implement S7 or S8 in this slice. Do not resume uncommitted work.
+
+This is chain start. ready_for_next.sh returning NO_TASK is expected. The operator message is the assignment. Write a specification with concrete acceptance criteria covering the default, the squad.conf pin, the per-request override, the worker record field, roles.tsv, and --kind at spawn. Then hand the spec off. Specifier does not implement.
+
+Keep the slice inside bin/, swarmforge/scripts/, test/, docs/, prompts/, swarmforge/roles/, swarmforge/contracts/, AGENTS.md, and CLAUDE.md. Include AGENTS.md and CLAUDE.md in the path list when an invariant lives there. Protocol tokens, exit codes, and file formats stay compatible. Edit prompts/ as source of truth and sync installed copies when a role prompt must change. Smoke must stay green.

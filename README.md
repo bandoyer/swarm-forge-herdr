@@ -187,7 +187,7 @@ contract.
 | `six-grok-codex-review` | `specifier` | Isolated six-role evidence pipeline | Grok judges/hardens, Sol codes/QAs; human integration |
 | `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Recommended Grok+Codex: Sol judges/QAs, Grok codes/hardens; human integration |
 | `six-codex-grok-fable-review` | `specifier` | Isolated six-role evidence pipeline | Same, with Fable 5 High as architect; human integration |
-| `six-mix-fable-review` | `specifier` | Isolated six-role evidence pipeline | Mix: Grok spec/clean/harden, Sol code/QA, Fable architect; human integration |
+| `six-mix-fable-review` | `specifier` | Isolated six-role evidence pipeline | Mix: Fable spec/architect, Sol code/QA, Grok clean/harden; human integration |
 | `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |
 | `six-claude-codex-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-informed Opus and Sol roles; human integration |
 
