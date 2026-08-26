@@ -11,10 +11,11 @@
 ;;   REASON: <one line>
 ;;
 ;; separated by blank lines, in the order of the action table: squad-s3.md's
-;; rows 1-10 plus squad-s4.md's approval rows 11-13 and its amendment of
-;; row 5 (the merge gate). The daemon applies the mechanical actions; the
-;; leader acts on the residual ones. Exit 0 always — an empty report is a
-;; valid report — and nothing on disk is ever created, written, or deleted.
+;; rows 1-10 plus squad-s4.md's approval rows 11-13, its amendment of
+;; row 5 (the merge gate), and squad-hardening S5's row 14 (report-orphan).
+;; The daemon applies the mechanical actions; the leader acts on the
+;; residual ones. Exit 0 always — an empty report is a valid report — and
+;; nothing on disk is ever created, written, or deleted.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
@@ -53,15 +54,18 @@
 
 (defn advice
   "All advisor blocks for one file-state snapshot: rows 1-10 of the
-  squad-s3.md action table plus the squad-s4.md approval rows 11-13,
-  emitted in table order and sorted by record id within a row. Replaced
-  assignments (:replaced-by set) are retired records — squad_assign's
-  replace! reissues their work under the new id — so they trigger no spawn
-  or judgment rows; their pending spawn-requests surface as stale (row 3)
-  and their still-active workers are still offered for retirement (rows
-  6-7). With no require_approval line and no approval records the report
-  is byte-identical to S3: row 5 is only amended when merge-gate? is set,
-  and rows 11-13 fire only off the gate or off approval records."
+  squad-s3.md action table plus the squad-s4.md approval rows 11-13 and
+  S5's report-orphan row 14, emitted in table order and sorted by record
+  id within a row. Replaced assignments (:replaced-by set) are retired
+  records — squad_assign's replace! reissues their work under the new id
+  — so they trigger no spawn or judgment rows; their pending
+  spawn-requests surface as stale (row 3) and their still-active workers
+  are still offered for retirement (rows 6-7). With no require_approval
+  line and no approval records the report is byte-identical to S3 plus
+  row 14: row 5 is only amended when merge-gate? is set, and rows 11-13
+  fire only off the gate or off approval records. Row 14 is file-state
+  only — a bound :allocated or :active worker suppresses it without
+  consulting herdr."
   [{:keys [requests assignments workers approvals cap max-depth merge-gate?]}]
   (let [by-id (into {} (map (juxt :id identity)) assignments)
         live (remove :replaced-by assignments)
@@ -165,7 +169,16 @@
                       (nil? (approved-for (:gate approval) (:target approval))))]
        (block "handle-approval-rejection" "residual" (:target approval)
               (str "approval " (:id approval)
-                   " rejected; leader rejects or reworks the assignment"))))))
+                   " rejected; leader rejects or reworks the assignment")))
+     ;; row 14 — spawned with no bound :allocated/:active worker. File
+     ;; state only: an actually absent agent is not an orphan here until
+     ;; reconciliation has retired (or never written) that worker.
+     (for [a live :when (and (= :spawned (:state a))
+                             (not (some #(and (= (:id a) (:assignment %))
+                                              (squad-lib/active-states (:state %)))
+                                        workers)))]
+       (block "report-orphan" "residual" (:id a)
+              "spawned assignment has no non-retired worker; leader must reject and replace it")))))
 
 ;; --- entry ----------------------------------------------------------------
 

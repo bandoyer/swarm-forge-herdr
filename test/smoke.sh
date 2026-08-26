@@ -1181,7 +1181,7 @@ synth m3 '{:id "m3" :template "merger" :state :merge-blocked :replaces "c9"}'
 synth c10 '{:id "c10" :template "implementer" :state :created}'
 OUT="$("$SCRIPTS/squad_next.sh")"
 SEQ="$(grep '^NEXT_ACTION: ' <<<"$OUT" | sed 's/^NEXT_ACTION: //' | tr '\n' ' ')"
-WANT="spawn drop-stale-spawn-request review merge retire-worker retire-worker route-merger route-merger escalate-to-user needs-spawn-request "
+WANT="spawn drop-stale-spawn-request review merge retire-worker retire-worker route-merger route-merger escalate-to-user needs-spawn-request report-orphan "
 [ "$SEQ" = "$WANT" ] || { echo "$OUT"; fail "action sequence should follow table order; got: $SEQ"; }
 ok "all rows fire in table order"
 block_of() { grep -A3 "^NEXT_ACTION: $1\$" <<<"$OUT"; }
@@ -1201,15 +1201,17 @@ block_of escalate-to-user | grep -q 'TARGET: m2' || fail "row 9 should target m2
 ok "row 9: escalate at the depth cap"
 block_of needs-spawn-request | grep -q 'TARGET: c10' || fail "row 10 should target c10"
 ok "row 10: created without request reminded"
+block_of report-orphan | grep -q 'TARGET: c2' || fail "row 14 should target spawned c2 (no bound worker)"
+ok "row 14: spawned assignment with no worker is an orphan"
 for hidden in c8 m1 c9; do
   if grep -q "^TARGET: $hidden\$" <<<"$OUT"; then fail "replaced assignment $hidden should stay silent"; fi
 done
 ok "replaced assignments trigger no judgment rows"
-[ "$(grep -c '^NEXT_ACTION: ' <<<"$OUT")" -eq 10 ] || fail "expected 10 blocks"
-[ "$(grep -c '^CLASS: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a CLASS line"
-[ "$(grep -c '^TARGET: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a TARGET line"
-[ "$(grep -c '^REASON: ' <<<"$OUT")" -eq 10 ] || fail "every block needs a REASON line"
-[ "$(grep -c '^$' <<<"$OUT")" -eq 9 ] || { echo "$OUT"; fail "10 blocks need exactly 9 blank separators"; }
+[ "$(grep -c '^NEXT_ACTION: ' <<<"$OUT")" -eq 11 ] || fail "expected 11 blocks"
+[ "$(grep -c '^CLASS: ' <<<"$OUT")" -eq 11 ] || fail "every block needs a CLASS line"
+[ "$(grep -c '^TARGET: ' <<<"$OUT")" -eq 11 ] || fail "every block needs a TARGET line"
+[ "$(grep -c '^REASON: ' <<<"$OUT")" -eq 11 ] || fail "every block needs a REASON line"
+[ "$(grep -c '^$' <<<"$OUT")" -eq 10 ] || { echo "$OUT"; fail "11 blocks need exactly 10 blank separators"; }
 ok "blocks are 4 lines separated by single blank lines"
 
 step "advisor: max_merger_depth read from squad.conf"
@@ -1392,6 +1394,82 @@ if grep -A3 '^NEXT_ACTION: handle-approval-rejection$' <<<"$OUT" | grep -q 'TARG
   fail "an approved record superseding the rejection must silence row 13 for f1"
 fi
 ok "superseded rejection does not contradict the released merge"
+
+step "advisor: row 14 report-orphan (spawned, no bound non-retired worker)"
+R14="$WORK/advisor-r14"
+mkdir -p "$R14/.swarmforge" "$R14/swarmforge"
+cp "$PROJECT/.swarmforge/roles.tsv" "$R14/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$R14/swarmforge/scripts"
+cd "$R14"
+synth() { # synth <assignment-id> <status-edn>
+  mkdir -p ".swarmforge/squad/assignments/$1"
+  printf '%s\n' "$2" > ".swarmforge/squad/assignments/$1/status.edn"
+}
+put_worker() { # put_worker <name> <record-edn>
+  mkdir -p .swarmforge/squad/workers
+  printf '%s\n' "$2" > ".swarmforge/squad/workers/$1.edn"
+}
+orphan_block() { grep -A3 '^NEXT_ACTION: report-orphan$' <<<"$OUT"; }
+synth o1 '{:id "o1" :template "implementer" :state :spawned}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+expect "row 14: missing worker record" "NEXT_ACTION: report-orphan" <<<"$OUT"
+orphan_block | grep -q 'TARGET: o1' || { echo "$OUT"; fail "row 14 should target o1"; }
+orphan_block | grep -q 'CLASS: residual' || fail "row 14 is residual"
+orphan_block | grep -q 'REASON: spawned assignment has no non-retired worker; leader must reject and replace it' \
+  || { echo "$OUT"; fail "row 14 reason should tell the leader to reject and replace"; }
+ok "no worker record produces report-orphan"
+put_worker w-o1-dead '{:name "w-o1-dead" :template "implementer" :assignment "o1" :state :retired}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+orphan_block | grep -q 'TARGET: o1' || { echo "$OUT"; fail "retired bound worker should still report-orphan o1"; }
+ok "only retired bound workers produce report-orphan"
+put_worker w-o1-alloc '{:name "w-o1-alloc" :template "implementer" :assignment "o1" :state :allocated}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+if grep -q '^NEXT_ACTION: report-orphan$' <<<"$OUT"; then
+  echo "$OUT"; fail "bound :allocated worker must suppress report-orphan"
+fi
+ok "allocated bound worker suppresses row 14"
+rm -f .swarmforge/squad/workers/w-o1-alloc.edn
+put_worker w-o1-act '{:name "w-o1-act" :template "implementer" :assignment "o1" :state :active}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+if grep -q '^NEXT_ACTION: report-orphan$' <<<"$OUT"; then
+  echo "$OUT"; fail "bound :active worker must suppress report-orphan"
+fi
+ok "active bound worker suppresses row 14"
+rm -f .swarmforge/squad/workers/w-o1-act.edn
+put_worker w-other '{:name "w-other" :template "implementer" :assignment "else" :state :active}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+orphan_block | grep -q 'TARGET: o1' || { echo "$OUT"; fail "worker bound to another assignment must not suppress o1"; }
+ok "unrelated worker does not suppress row 14"
+synth o2 '{:id "o2" :template "implementer" :state :created}'
+synth o3 '{:id "o3" :template "implementer" :state :result}'
+synth o4 '{:id "o4" :template "implementer" :state :spawned :replaced-by "o5"}'
+synth o5 '{:id "o5" :template "implementer" :state :created}'
+OUT="$("$SCRIPTS/squad_next.sh")"
+if grep -A3 '^NEXT_ACTION: report-orphan$' <<<"$OUT" | grep -q 'TARGET: o2'; then
+  fail "created assignment must not produce report-orphan"
+fi
+if grep -A3 '^NEXT_ACTION: report-orphan$' <<<"$OUT" | grep -q 'TARGET: o3'; then
+  fail "result assignment must not produce report-orphan"
+fi
+if grep -A3 '^NEXT_ACTION: report-orphan$' <<<"$OUT" | grep -q 'TARGET: o4'; then
+  fail "replaced spawned assignment must not produce report-orphan"
+fi
+ok "row 14 excludes non-spawned and replaced assignments"
+OUT="$("$SCRIPTS/squad_next.sh" --residual-only)"
+expect "--residual-only includes report-orphan" "NEXT_ACTION: report-orphan" <<<"$OUT"
+OUT="$("$SCRIPTS/squad_next.sh" --mechanical-only)"
+if grep -q '^NEXT_ACTION: report-orphan$' <<<"$OUT"; then
+  fail "--mechanical-only must exclude report-orphan"
+fi
+ok "--mechanical-only excludes report-orphan"
+BEFORE="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum)"
+FIRST="$("$SCRIPTS/squad_next.sh")"
+SECOND="$("$SCRIPTS/squad_next.sh")"
+AFTER="$(find .swarmforge swarmforge -type f -print0 | sort -z | xargs -0 md5sum)"
+[ "$BEFORE" = "$AFTER" ] || fail "row 14 advisor mutated file state"
+[ "$FIRST" = "$SECOND" ] || fail "row 14 advisor output should be deterministic"
+ok "row 14 is read-only and deterministic"
+cd "$CODER"
 cd "$CODER"
 
 step "theme: create recovers from a crash-interrupted create"
@@ -1677,6 +1755,260 @@ bb "$SCRIPTS/squadd.bb" "$CODER" --once >/dev/null 2>&1
 COUNT2=$(grep -c 'user-notify-skipped apnr1' .swarmforge/squad/daemon/squadd.log)
 [ "$COUNT1" = "$COUNT2" ] || fail "approval re-buzzed on second poll"
 ok "one buzz per approval (durable dedup)"
+
+step "squadd: S5 dead-worker reconciliation (fake herdr on PATH)"
+REC="$WORK/r5"
+REC_BIN="$WORK/r5-bin"
+mkdir -p "$REC/swarmforge" "$REC/.swarmforge" "$REC_BIN"
+git -C "$REC" init -qb main
+echo base > "$REC/tracked.txt"
+printf '.swarmforge/\n.worktrees/\n' > "$REC/.gitignore"
+git -C "$REC" add tracked.txt .gitignore
+git -C "$REC" -c user.email=smoke@test -c user.name=smoke commit -qm initial
+printf 'squad-leader\tmaster\t%s\tsquad-leader\tsquad-leader\tclaude\ttask\n' "$REC" \
+  > "$REC/.swarmforge/roles.tsv"
+cp -r "$TOOL_ROOT/swarmforge/scripts" "$REC/swarmforge/scripts"
+export REC_CALLS="$REC/herdr-calls.log"
+export REC_MODE="$REC/herdr-mode"
+export REC_AGENTS="$REC/herdr-agents.txt"
+: > "$REC_CALLS"
+printf 'missing\n' > "$REC_MODE"
+: > "$REC_AGENTS"
+cat > "$REC_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$REC_CALLS"
+mode=$(tr -d '[:space:]' < "$REC_MODE" 2>/dev/null || echo missing)
+case "${1-} ${2-}" in
+  "agent list")
+    case "$mode" in
+      fail)
+        printf '{"error":{"code":"server_unavailable","message":"down"}}\n' >&2
+        exit 1
+        ;;
+      unusable)
+        printf 'not-a-list\n'
+        exit 0
+        ;;
+      present)
+        printf '{"result":{"agents":['
+        first=1
+        while IFS= read -r name; do
+          [ -z "$name" ] && continue
+          [ "$first" -eq 1 ] || printf ','
+          first=0
+          printf '{"name":"%s"}' "$name"
+        done < "$REC_AGENTS"
+        printf ']}}\n'
+        ;;
+      missing|*)
+        printf '{"result":{"agents":[]}}\n'
+        ;;
+    esac
+    ;;
+  *)
+    printf 'unexpected fake herdr call: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+EOF
+chmod +x "$REC_BIN/herdr"
+cat > "$REC/fake-wake" <<'EOF'
+#!/usr/bin/env bash
+echo "WAKE $*" >> "$(dirname "$0")/wakes.log"
+EOF
+chmod +x "$REC/fake-wake"
+cd "$REC"
+export SWARMFORGE_NO_AGENT=1
+export SWARM_BIN="$TOOL_ROOT/bin/swarm"
+echo "Do the work." > instr.md
+list_count() {
+  if [ -f "$REC_CALLS" ]; then grep -c 'agent list' "$REC_CALLS" || true; else echo 0; fi
+}
+wait_lists() {
+  local n="$1" start now c
+  start=$(date +%s)
+  while true; do
+    c=$(list_count)
+    [ "$c" -ge "$n" ] && return 0
+    now=$(date +%s)
+    if [ $((now - start)) -ge 20 ]; then
+      echo "herdr calls ($c, want $n):"; cat "$REC_CALLS" 2>/dev/null || true
+      fail "timeout waiting for $n herdr agent list calls"
+    fi
+    sleep 0.1
+  done
+}
+worker_state() { # worker_state <name>
+  grep -o ':state :[a-z-]*' ".swarmforge/squad/workers/$1.edn" | head -n1
+}
+start_squadd() {
+  : > "$REC_CALLS"
+  rm -f "$REC/.swarmforge/squad/daemon/stop" "$REC/wakes.log" \
+    "$REC/.swarmforge/squad/daemon/squadd.log"
+  PATH="$REC_BIN:$PATH" \
+    SWARM_BIN="$TOOL_ROOT/bin/swarm" \
+    SWARMFORGE_NO_AGENT=1 \
+    SWARMFORGE_WAKE_CMD="$REC/fake-wake" \
+    REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" \
+    bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" > "$REC/squadd.out" 2>&1 &
+  SQUADDPID=$!
+}
+stop_squadd() {
+  mkdir -p "$REC/.swarmforge/squad/daemon"
+  touch "$REC/.swarmforge/squad/daemon/stop"
+  wait "$SQUADDPID" 2>/dev/null || true
+}
+"$TOOL_ROOT/swarmforge/scripts/squad_assign.sh" create a1 implementer instr.md > /dev/null
+OUT="$("$TOOL_ROOT/bin/swarm" squad spawn a1 implementer --no-agent)"
+WA1="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+[ -n "$WA1" ] || fail "S5 setup: spawn should print a worker name"
+[ -d ".worktrees/$WA1" ] || fail "S5 setup: worker worktree missing"
+grep -q "^$WA1	" .swarmforge/roles.tsv || fail "S5 setup: worker not in roles.tsv"
+ok "S5 fixture: active worker $WA1 on spawned a1"
+
+step "squadd: present agent keeps an active worker and resets a miss streak"
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WA1" | grep -q ':active' || fail "two misses must not retire $WA1"
+grep -q "^$WA1	" .swarmforge/roles.tsv || fail "two misses must keep $WA1 in roles.tsv"
+[ -d ".worktrees/$WA1" ] || fail "two misses must keep $WA1 worktree"
+ok "missing worker survives two consecutive successful polls"
+printf '%s\n' "$WA1" > "$REC_AGENTS"
+printf 'present\n' > "$REC_MODE"
+wait_lists 3
+sleep 0.4
+worker_state "$WA1" | grep -q ':active' || fail "a present observation must keep $WA1 active"
+ok "successful list containing the worker keeps it active"
+printf 'missing\n' > "$REC_MODE"
+wait_lists 5
+sleep 0.4
+worker_state "$WA1" | grep -q ':active' || fail "P must reset the miss streak; two later misses must not retire"
+[ -d ".worktrees/$WA1" ] || fail "reset streak must keep the worktree"
+if grep -q 'worker-lost' .swarmforge/squad/events.log 2>/dev/null; then
+  fail "reset streak must not log worker-lost"
+fi
+ok "a present observation resets the miss streak"
+stop_squadd
+
+step "squadd: third successful miss retires the worker and wakes the leader"
+: > "$REC/.swarmforge/squad/events.log"
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WA1" | grep -q ':active' || fail "pre-threshold: still active after two misses"
+grep -q "^$WA1	" .swarmforge/roles.tsv || fail "pre-threshold: still registered"
+[ -d ".worktrees/$WA1" ] || fail "pre-threshold: worktree still present"
+ok "record, routing, and worktree unchanged after two misses"
+wait_lists 3
+sleep 0.8
+worker_state "$WA1" | grep -q ':retired' || {
+  echo "worker record:"; cat ".swarmforge/squad/workers/$WA1.edn" 2>/dev/null || true
+  echo "squadd.log:"; cat .swarmforge/squad/daemon/squadd.log 2>/dev/null || true
+  fail "third miss should retire $WA1"
+}
+if grep -q "^$WA1	" .swarmforge/roles.tsv; then fail "retired worker still in roles.tsv"; fi
+[ ! -d ".worktrees/$WA1" ] || fail "retired worker worktree not removed"
+ok "third miss retires record, routing row, and worktree"
+LOST_COUNT="$(grep -c "worker-lost $WA1 agent absent" .swarmforge/squad/events.log || true)"
+[ "$LOST_COUNT" = "1" ] || {
+  cat .swarmforge/squad/events.log
+  fail "expected exactly one 'worker-lost $WA1 agent absent' event, got $LOST_COUNT"
+}
+ok "loss appends exactly one worker-lost event"
+grep -q "WAKE agent prompt squad-leader " wakes.log \
+  || { cat wakes.log 2>/dev/null; fail "loss should prompt the configured leader"; }
+grep -q "a1" wakes.log || { cat wakes.log; fail "wake notice must name the orphaned assignment id"; }
+ok "leader is prompted with the orphaned assignment id"
+stop_squadd
+
+step "squadd: herdr-unreachable after two misses neither advances nor resets the streak"
+"$TOOL_ROOT/swarmforge/scripts/squad_assign.sh" create a2 implementer instr.md > /dev/null
+OUT="$("$TOOL_ROOT/bin/swarm" squad spawn a2 implementer --no-agent)"
+WA2="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WA2" | grep -q ':active' || fail "a2 should still be active after two misses"
+printf 'fail\n' > "$REC_MODE"
+wait_lists 3
+sleep 0.4
+grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
+  || { cat .swarmforge/squad/daemon/squadd.log; fail "failed agent list should log reconcile-skipped herdr-unreachable"; }
+worker_state "$WA2" | grep -q ':active' || fail "unreachable herdr must not retire $WA2"
+grep -q "^$WA2	" .swarmforge/roles.tsv || fail "unreachable herdr must keep routing"
+[ -d ".worktrees/$WA2" ] || fail "unreachable herdr must keep the worktree"
+if grep -q "worker-lost $WA2" .swarmforge/squad/events.log 2>/dev/null; then
+  fail "unreachable herdr must not log worker-lost"
+fi
+ok "failed list logs skip and changes no artifacts"
+printf 'missing\n' > "$REC_MODE"
+wait_lists 4
+sleep 0.8
+worker_state "$WA2" | grep -q ':retired' || {
+  cat .swarmforge/squad/daemon/squadd.log
+  cat .swarmforge/squad/workers/"$WA2".edn
+  fail "next successful miss after U should complete the streak and retire $WA2"
+}
+ok "unreachable poll does not advance or reset the streak"
+stop_squadd
+
+step "squadd: unusable agent list is herdr-unreachable"
+printf 'unusable\n' > "$REC_MODE"
+mkdir -p .swarmforge/squad/daemon
+rm -f .swarmforge/squad/daemon/stop
+: > .swarmforge/squad/daemon/squadd.log
+PATH="$REC_BIN:$PATH" \
+  SWARM_BIN="$TOOL_ROOT/bin/swarm" \
+  SWARMFORGE_NO_AGENT=1 \
+  SWARMFORGE_WAKE_CMD=none \
+  REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" \
+  bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" --once
+grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
+  || { cat .swarmforge/squad/daemon/squadd.log; fail "unusable list should log herdr-unreachable"; }
+ok "unusable agent list is treated as herdr-unreachable"
+
+step "squadd: allocated launch grace vs aged allocated K=3"
+YOUNG=r5-implementer-young1
+OLD=r5-implementer-old1
+NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+OLD_TS="$(date -u -d '20 seconds ago' +%Y-%m-%dT%H:%M:%SZ)"
+mkdir -p .swarmforge/squad/assignments/young1 .swarmforge/squad/assignments/old1 \
+  .swarmforge/squad/workers .worktrees/$YOUNG .worktrees/$OLD
+printf '{:id "young1" :template "implementer" :state :spawned}\n' \
+  > .swarmforge/squad/assignments/young1/status.edn
+printf '{:id "old1" :template "implementer" :state :spawned}\n' \
+  > .swarmforge/squad/assignments/old1/status.edn
+printf '{:name "%s" :template "implementer" :assignment "young1" :state :allocated :updated-at "%s"}\n' \
+  "$YOUNG" "$NOW" > ".swarmforge/squad/workers/$YOUNG.edn"
+printf '{:name "%s" :template "implementer" :assignment "old1" :state :allocated :updated-at "%s"}\n' \
+  "$OLD" "$OLD_TS" > ".swarmforge/squad/workers/$OLD.edn"
+printf '%s\t%s\t%s/.worktrees/%s\t%s\t%s\tclaude\ttask\n' \
+  "$YOUNG" "$YOUNG" "$REC" "$YOUNG" "$YOUNG" "$YOUNG" >> .swarmforge/roles.tsv
+printf '%s\t%s\t%s/.worktrees/%s\t%s\t%s\tclaude\ttask\n' \
+  "$OLD" "$OLD" "$REC" "$OLD" "$OLD" "$OLD" >> .swarmforge/roles.tsv
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 3
+sleep 0.8
+worker_state "$YOUNG" | grep -q ':allocated' || {
+  cat ".swarmforge/squad/workers/$YOUNG.edn"
+  fail "young :allocated worker must survive at least three successful absences"
+}
+[ -d ".worktrees/$YOUNG" ] || fail "young allocated worktree must remain"
+worker_state "$OLD" | grep -q ':retired' || {
+  cat ".swarmforge/squad/workers/$OLD.edn"
+  cat .swarmforge/squad/daemon/squadd.log
+  fail "aged :allocated worker should retire on its third successful absence"
+}
+ok "launch grace holds a young allocated worker; aged allocated follows K=3"
+stop_squadd
+unset SWARMFORGE_NO_AGENT SWARM_BIN REC_CALLS REC_MODE REC_AGENTS
+cd "$CODER"
 
 step "squad report renders assignments, approvals, events"
 OUT="$("$TOOL_ROOT/bin/swarm" squad report)"

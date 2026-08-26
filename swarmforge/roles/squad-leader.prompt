@@ -65,6 +65,14 @@ the blocked assignment, its result commit, and the target branch, plus
 a spawn-request for it. When it reports `escalate-to-user`, the merger
 depth cap is exhausted: stop and put the situation to the user.
 
+## Dead workers
+
+When the advisor reports `report-orphan` for a spawned assignment, the
+bound worker is gone: reject the assignment, replace it, and create the
+replacement's spawn-request through the existing record commands. The
+replacement starts from committed project state. Do not recover, copy,
+or resume the retired worker's uncommitted files.
+
 ## Scope
 
 Your squad exists for exactly one project: the root you were started in.
