@@ -6,8 +6,10 @@
 ;; Lifecycle: allocated -> active -> retired (retire is also allowed
 ;; straight from allocated, for workers that never spawn). Capacity:
 ;; allocated+active workers are capped by max_transient_agents in
-;; swarmforge/squad.conf (default 10). Illegal transitions exit 2 with an
-;; INVALID_TRANSITION token; unknown workers report NO_SUCH_WORKER.
+;; swarmforge/squad.conf (default 10). Allocate is the single kind
+;; resolution point: explicit [kind], then worker_kind, then claude.
+;; Illegal transitions exit 2 with an INVALID_TRANSITION token; unknown
+;; workers report NO_SUCH_WORKER.
 
 (load-file (str (babashka.fs/path (babashka.fs/parent *file*) "squad_lib.bb")))
 
@@ -17,7 +19,7 @@
 
 (def usage-text
   (str "Usage: squad_worker.sh <subcommand> ...\n\n"
-       "  allocate <assignment-id> <template>\n"
+       "  allocate <assignment-id> <template> [kind]\n"
        "  activate <worker-name>\n"
        "  retire <worker-name> [reason...]\n"
        "  list [--active]"))
@@ -73,8 +75,11 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn allocate! [assignment-id template]
-  (let [project-name (fs/file-name (handoff-lib/project-root))
+(defn allocate! [assignment-id template explicit-kind]
+  (squad-lib/require-valid-agent-kind! explicit-kind)
+  ;; Resolve once at allocation: explicit arg, then worker_kind, then claude.
+  (let [agent-kind (or explicit-kind (squad-lib/configured-worker-kind))
+        project-name (fs/file-name (handoff-lib/project-root))
         worker (worker-name project-name template assignment-id)
         file (worker-file worker)
         cap (squad-lib/max-transient-agents)]
@@ -87,10 +92,12 @@
     (squad-lib/write-record! file {:name worker
                                    :template template
                                    :assignment assignment-id
+                                   :agent-kind agent-kind
                                    :state :allocated
                                    :created-at (handoff-lib/iso-now)})
     (squad-lib/log-event! worker "allocated"
-                          (str "template=" template " assignment=" assignment-id))
+                          (str "template=" template " assignment=" assignment-id
+                               " kind=" agent-kind))
     (println (str "WORKER_ALLOCATED: " worker))))
 
 (defn activate! [worker-name]
@@ -119,7 +126,9 @@
   (let [[command & params] args
         params (vec params)]
     (case command
-      "allocate" (if (= 2 (count params)) (apply allocate! params) (usage-die))
+      "allocate" (if (<= 2 (count params) 3)
+                   (allocate! (nth params 0) (nth params 1) (nth params 2 nil))
+                   (usage-die))
       "activate" (if (= 1 (count params)) (activate! (first params)) (usage-die))
       "retire" (if (<= 1 (count params))
                  (retire! (first params) (str/join " " (rest params)))
