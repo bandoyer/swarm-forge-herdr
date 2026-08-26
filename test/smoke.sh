@@ -1789,14 +1789,16 @@ case "${1-} ${2-}" in
         printf 'not-a-list\n'
         exit 0
         ;;
-      present)
+      present|present-label)
+        key=name
+        [ "$mode" = present-label ] && key=label
         printf '{"result":{"agents":['
         first=1
         while IFS= read -r name; do
           [ -z "$name" ] && continue
           [ "$first" -eq 1 ] || printf ','
           first=0
-          printf '{"name":"%s"}' "$name"
+          printf '{"%s":"%s"}' "$key" "$name"
         done < "$REC_AGENTS"
         printf ']}}\n'
         ;;
@@ -1840,6 +1842,16 @@ wait_lists() {
 }
 worker_state() { # worker_state <name>
   grep -o ':state :[a-z-]*' ".swarmforge/squad/workers/$1.edn" | head -n1
+}
+plant_active() { # plant_active <name> <assignment-id>
+  mkdir -p ".swarmforge/squad/assignments/$2" ".swarmforge/squad/workers" ".worktrees/$1"
+  printf '{:id "%s" :template "implementer" :state :spawned}\n' "$2" \
+    > ".swarmforge/squad/assignments/$2/status.edn"
+  printf '{:name "%s" :template "implementer" :assignment "%s" :state :active :updated-at "%s"}\n' \
+    "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > ".swarmforge/squad/workers/$1.edn"
+  printf '%s\t%s\t%s/.worktrees/%s\t%s\t%s\tclaude\ttask\n' \
+    "$1" "$1" "$REC" "$1" "$1" "$1" >> .swarmforge/roles.tsv
 }
 start_squadd() {
   : > "$REC_CALLS"
@@ -2005,6 +2017,98 @@ worker_state "$OLD" | grep -q ':retired' || {
   fail "aged :allocated worker should retire on its third successful absence"
 }
 ok "launch grace holds a young allocated worker; aged allocated follows K=3"
+stop_squadd
+
+step "squadd: a herdr :label matches the worker name (existing-agents shape)"
+WAL=r5-implementer-lbl1
+plant_active "$WAL" lbl1
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WAL" | grep -q ':active' || fail "label probe setup: two misses must not retire $WAL"
+printf '%s\n' "$WAL" > "$REC_AGENTS"
+printf 'present-label\n' > "$REC_MODE"
+wait_lists 3
+sleep 0.4
+worker_state "$WAL" | grep -q ':active' || fail "a :label observation must keep $WAL active"
+printf 'missing\n' > "$REC_MODE"
+wait_lists 5
+sleep 0.4
+worker_state "$WAL" | grep -q ':active' || fail ":label presence must reset the miss streak; two later misses must not retire"
+if grep -q "worker-lost $WAL" .swarmforge/squad/events.log 2>/dev/null; then
+  fail "reset via :label must not log worker-lost"
+fi
+ok "herdr agent :label is a live name and resets the streak"
+stop_squadd
+
+step "squadd: miss streaks are independent per worker"
+KEEP=r5-implementer-keep1
+GONE=r5-implementer-gone1
+plant_active "$KEEP" keep1
+plant_active "$GONE" gone1
+printf '%s\n' "$KEEP" > "$REC_AGENTS"
+printf 'present\n' > "$REC_MODE"
+start_squadd
+wait_lists 3
+sleep 0.8
+worker_state "$KEEP" | grep -q ':active' || {
+  cat ".swarmforge/squad/workers/$KEEP.edn"
+  fail "present worker $KEEP must stay active while a peer is missing"
+}
+grep -q "^$KEEP	" .swarmforge/roles.tsv || fail "present worker must stay registered"
+worker_state "$GONE" | grep -q ':retired' || {
+  cat ".swarmforge/squad/workers/$GONE.edn"
+  cat .swarmforge/squad/daemon/squadd.log
+  fail "missing peer $GONE should retire on its own K=3 streak"
+}
+if grep -q "^$GONE	" .swarmforge/roles.tsv; then fail "missing peer still in roles.tsv"; fi
+ok "each candidate has its own miss streak"
+stop_squadd
+
+step "squadd: one poll that loses two workers names both assignment ids"
+OA=r5-implementer-oa1
+OB=r5-implementer-ob1
+plant_active "$OA" oa1
+plant_active "$OB" ob1
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 3
+sleep 0.8
+worker_state "$OA" | grep -q ':retired' || fail "oa1 worker should retire on miss three"
+worker_state "$OB" | grep -q ':retired' || fail "ob1 worker should retire on miss three"
+LINE_BOTH="$(grep 'Orphaned assignment(s):' wakes.log | grep 'oa1' | grep 'ob1' || true)"
+[ -n "$LINE_BOTH" ] || { cat wakes.log; fail "both newly orphaned ids must appear in one wake notice"; }
+ok "one poll names every newly orphaned assignment"
+stop_squadd
+
+step "squadd: a non-reconcile retire prunes the miss streak before name reuse"
+"$TOOL_ROOT/swarmforge/scripts/squad_assign.sh" create stale1 implementer instr.md > /dev/null
+OUT="$("$TOOL_ROOT/bin/swarm" squad spawn stale1 implementer --no-agent)"
+WS="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+[ -n "$WS" ] || fail "prune setup: spawn should print a worker name"
+printf 'missing\n' > "$REC_MODE"
+start_squadd
+wait_lists 2
+sleep 0.4
+worker_state "$WS" | grep -q ':active' || fail "prune setup: two misses must not retire $WS"
+"$TOOL_ROOT/bin/swarm" squad retire "$WS" "manual other-path" --no-agent > /dev/null
+worker_state "$WS" | grep -q ':retired' || fail "prune setup: manual retire should mark $WS retired"
+wait_lists 3
+sleep 0.4
+plant_active "$WS" reuse1
+wait_lists 5
+sleep 0.4
+worker_state "$WS" | grep -q ':active' || {
+  echo "worker record:"; cat ".swarmforge/squad/workers/$WS.edn" 2>/dev/null || true
+  echo "squadd.log:"; cat .swarmforge/squad/daemon/squadd.log 2>/dev/null || true
+  fail "reused name $WS inherited a stale miss streak and retired after two fresh misses"
+}
+[ -d ".worktrees/$WS" ] || fail "reused-name worktree should remain after two misses"
+if grep -q "worker-lost $WS" .swarmforge/squad/events.log 2>/dev/null; then
+  fail "reused name must not be S5-lost after two fresh misses"
+fi
+ok "stale miss streaks are pruned; a reused name starts at zero"
 stop_squadd
 unset SWARMFORGE_NO_AGENT SWARM_BIN REC_CALLS REC_MODE REC_AGENTS
 cd "$CODER"

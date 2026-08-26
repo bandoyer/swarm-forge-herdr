@@ -68,7 +68,7 @@
 
 (def allocated-grace-seconds
   "An :allocated worker younger than this is still in launch grace and
-  does not enter the miss counter (S5 open question 1)."
+  does not enter the miss counter (docs/squad-hardening-s5-spec.md)."
   15)
 
 (def loss-threshold
