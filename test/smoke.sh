@@ -27,6 +27,19 @@ step "agent session guides stay synchronized"
 diff -u "$TOOL_ROOT/CLAUDE.md" "$TOOL_ROOT/AGENTS.md" \
   || fail "CLAUDE.md and AGENTS.md drifted; Grok discovers both"
 ok "Claude, Codex, and Grok receive the same repository operations guide"
+for g in AGENTS.md CLAUDE.md; do
+  grep -qF '10+3' "$TOOL_ROOT/$g" \
+    && fail "$g still claims the 10+3-row advisor table is exhaustive"
+  grep -q '14-row' "$TOOL_ROOT/$g" \
+    || fail "$g must describe the complete 14-row advisor table"
+  grep -q 'squad-s3.md' "$TOOL_ROOT/$g" \
+    || fail "$g must cite docs/squad-s3.md for rows 1-10"
+  grep -q 'squad-s4.md' "$TOOL_ROOT/$g" \
+    || fail "$g must cite docs/squad-s4.md for rows 11-13"
+  grep -q 'squad-hardening-s5-spec.md' "$TOOL_ROOT/$g" \
+    || fail "$g must cite docs/squad-hardening-s5-spec.md for row 14"
+done
+ok "session guides describe the complete 14-row advisor table"
 
 step "installed prompts match their sources"
 # This repo dogfoods itself, so swarmforge/ holds installed copies of the
