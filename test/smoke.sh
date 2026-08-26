@@ -236,6 +236,13 @@ cmp "$TOOL_ROOT/prompts/contracts/squad-leader.contract.edn" \
   "$S7_UP/swarmforge/contracts/squad-leader.contract.edn" \
   || fail "squad up did not install the stock leader contract"
 ok "squad up installs the contract and launches a gated daemon"
+printf '{:artifact-roots ["docs/"]}\n' \
+  > "$S7_UP/swarmforge/contracts/squad-leader.contract.edn"
+(cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" squad up >/dev/null)
+grep -qxF '{:artifact-roots ["docs/"]}' \
+  "$S7_UP/swarmforge/contracts/squad-leader.contract.edn" \
+  || fail "squad up must not overwrite an existing leader contract"
+ok "squad up leaves an existing leader contract in place"
 (cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" down >/dev/null)
 
 step "review-gated Codex pack isolates both roles"
@@ -852,9 +859,16 @@ step "squad-leader contract permits records, recorded-result rework, and notes"
 echo "Leader may write records." > leader-instructions.md
 SWARMFORGE_ROLE=squad-leader "$SCRIPTS/squad_assign.sh" \
   create s7rework implementer leader-instructions.md > /dev/null
-printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$GOOD" > leader-result.handoff
+GOOD_FULL="$(git rev-parse "$GOOD")"
+printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$GOOD_FULL" > leader-result.handoff
 SWARMFORGE_ROLE=squad-leader "$SCRIPTS/squad_assign.sh" \
   result s7rework leader-result.handoff > /dev/null
+mkdir -p .swarmforge/squad/assignments/s7junk .swarmforge/squad/assignments/s7missing
+printf 'type: git_handoff\ncommit: not-a-git-object\n' \
+  > .swarmforge/squad/assignments/s7junk/result.handoff
+printf 'type: git_handoff\nfrom: worker\n' \
+  > .swarmforge/squad/assignments/s7missing/result.handoff
+SWARMFORGE_ROLE=squad-leader "$SCRIPTS/squad_assign.sh" accept s7rework > /dev/null
 printf 'type: git_handoff\nto: cleaner\npriority: 50\ntask: s7rework\ncommit: %s\n' \
   "$GOOD" > leader-draft.txt
 OUT="$(SWARMFORGE_ROLE=squad-leader "$SCRIPTS/swarm_handoff.sh" leader-draft.txt)"
@@ -901,16 +915,16 @@ expect "accept transition" "ASSIGNMENT_STATE: a1 result -> accepted" <<<"$OUT"
 
 step "squad: daemon-only merge transitions fail closed before record access"
 S7_EVENTS_BEFORE="$(wc -l < .swarmforge/squad/events.log)"
-assert_daemon_only() { # assert_daemon_only <unset|blank> <merge|merge-blocked> <id>
+assert_daemon_only() { # assert_daemon_only <unset|blank|whitespace> <merge|merge-blocked> <id>
   local gate_value="$1" gated_command="$2" gated_id="$3" OUT STATUS
   local gated_args=("$gated_id")
   [ "$gated_command" = merge ] || gated_args+=(detail)
   set +e
-  if [ "$gate_value" = blank ]; then
-    OUT="$(SWARMFORGE_SQUADD='' "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)"
-  else
-    OUT="$(env -u SWARMFORGE_SQUADD "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)"
-  fi
+  case "$gate_value" in
+    blank) OUT="$(SWARMFORGE_SQUADD='' "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)" ;;
+    whitespace) OUT="$(SWARMFORGE_SQUADD='   ' "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)" ;;
+    *) OUT="$(env -u SWARMFORGE_SQUADD "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)" ;;
+  esac
   STATUS=$?
   set -e
   [ "$STATUS" -eq 2 ] || fail "$gated_command with $gate_value gate should exit 2, got $STATUS"
@@ -919,14 +933,16 @@ assert_daemon_only() { # assert_daemon_only <unset|blank> <merge|merge-blocked> 
 }
 assert_daemon_only unset merge a1
 assert_daemon_only blank merge a1
+assert_daemon_only whitespace merge a1
 assert_daemon_only unset merge-blocked a1
 assert_daemon_only blank merge-blocked a1
+assert_daemon_only whitespace merge-blocked a1
 assert_daemon_only unset merge missing-s7
 grep -q ':state :accepted' .swarmforge/squad/assignments/a1/status.edn \
   || fail "refused daemon-only transition changed a1"
 [ "$(wc -l < .swarmforge/squad/events.log)" -eq "$S7_EVENTS_BEFORE" ] \
   || fail "refused daemon-only transitions appended events"
-ok "merge gates reject unset/blank callers before touching records"
+ok "merge gates reject unset/blank/whitespace callers before touching records"
 
 step "squad: presented daemon gate preserves transition behavior"
 for gated_id in a5 a6; do
@@ -939,6 +955,12 @@ expect "gated merge keeps transition token" "ASSIGNMENT_STATE: a5 accepted -> me
 OUT="$(SWARMFORGE_SQUADD=1 "$SCRIPTS/squad_assign.sh" merge-blocked a6 conflict detail)"
 expect "gated merge-blocked keeps transition token" \
   "ASSIGNMENT_STATE: a6 accepted -> merge-blocked" <<<"$OUT"
+"$SCRIPTS/squad_assign.sh" create a7 implementer instructions.md > /dev/null
+"$SCRIPTS/squad_assign.sh" result a7 worker.handoff > /dev/null
+"$SCRIPTS/squad_assign.sh" accept a7 > /dev/null
+OUT="$(SWARMFORGE_SQUADD=yes "$SCRIPTS/squad_assign.sh" merge a7)"
+expect "any non-blank gate value presents the daemon gate" \
+  "ASSIGNMENT_STATE: a7 accepted -> merged" <<<"$OUT"
 
 step "squad: reject records the reason"
 "$SCRIPTS/squad_assign.sh" create a2 implementer instructions.md > /dev/null
