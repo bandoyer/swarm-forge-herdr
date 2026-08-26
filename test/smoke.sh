@@ -458,6 +458,36 @@ grep -qE '^window .* (grok|codex|claude) (master|none) ' "$MIX_CONF" \
   && fail "mix pack should keep every role out of the project root"
 ok "mixed Grok Sol Fable six-pack pins all three providers"
 
+step "mixed Codex Grok six-pack pins the Fable-free replacement"
+MIX_CODEX_GROK_PACK="$WORK/mix-codex-grok-pack"
+mkdir -p "$MIX_CODEX_GROK_PACK"
+git -C "$MIX_CODEX_GROK_PACK" init -qb main
+git -C "$MIX_CODEX_GROK_PACK" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$MIX_CODEX_GROK_PACK" && "$TOOL_ROOT/bin/swarm" init six-mix-codex-grok-review >/dev/null)
+MIX_CODEX_GROK_CONF="$MIX_CODEX_GROK_PACK/swarmforge/swarmforge.conf"
+grep -q '^window specifier codex mcg-specifier task --model gpt-5.6-sol -c model_reasoning_effort=max ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix specifier should pin Sol Max"
+grep -q '^window coder codex mcg-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix coder should pin Sol High"
+grep -q '^window cleaner grok mcg-cleaner batch --model grok-4.6 --reasoning-effort high ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix cleaner should pin Grok 4.6 High"
+grep -q '^window architect grok mcg-architect batch --model grok-4.6 --reasoning-effort xhigh ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix architect should pin Grok 4.6 xHigh"
+grep -q '^window hardener grok mcg-hardener batch --model grok-4.6 --reasoning-effort high ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix hardener should pin Grok 4.6 High"
+grep -q '^window qa codex mcg-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
+  "$MIX_CODEX_GROK_CONF" \
+  || fail "Codex Grok mix QA should pin Sol xHigh"
+grep -qE '^window .* (grok|codex) (master|none) ' "$MIX_CODEX_GROK_CONF" \
+  && fail "Codex Grok mix should keep every role out of the project root"
+ok "mixed Codex Grok six-pack pins the agreed roles"
+
 step "every provider-specific pack initializes from a complete pair"
 for conf in "$TOOL_ROOT"/packs/*.conf; do
   pack="$(basename "$conf" .conf)"
