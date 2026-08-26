@@ -12,6 +12,7 @@ WORK="$(mktemp -d)"
 if command -v cygpath >/dev/null 2>&1; then WORK="$(cygpath -m "$WORK")"; TOOL_ROOT="$(cygpath -m "$TOOL_ROOT")"; fi
 trap 'rm -rf "$WORK"' EXIT
 export SWARMFORGE_WAKE_CMD=none
+unset SWARMFORGE_SQUADD
 
 PASS=0
 step() { echo "--- $1"; }
@@ -40,8 +41,28 @@ for guide in AGENTS.md CLAUDE.md; do
     || fail "$guide must cite docs/squad-s4.md for rows 11-13"
   grep -qE 'squad-hardening-s5-spec\.md row 14' <<<"$guide_text" \
     || fail "$guide must cite docs/squad-hardening-s5-spec.md for row 14"
+  grep -qF 'SWARMFORGE_SQUADD=1' <<<"$guide_text" \
+    || fail "$guide must document the daemon-only transition gate"
+  grep -qF 'DAEMON_ONLY' <<<"$guide_text" \
+    || fail "$guide must document the daemon-only refusal token"
 done
 ok "session guides describe the complete 14-row advisor table"
+
+step "stock squad-leader contract is exact and installed copy is synchronized"
+STOCK_LEADER_CONTRACT='{:artifact-roots [] :forbid-git-handoff true}'
+[ "$(cat "$TOOL_ROOT/prompts/contracts/squad-leader.contract.edn")" = "$STOCK_LEADER_CONTRACT" ] \
+  || fail "stock squad-leader contract has the wrong schema"
+diff -u "$TOOL_ROOT/prompts/contracts/squad-leader.contract.edn" \
+  "$TOOL_ROOT/swarmforge/contracts/squad-leader.contract.edn" \
+  || fail "installed squad-leader contract drifted from its source"
+ok "stock squad-leader contract forbids new git handoffs"
+grep -qF "rework handoff's commit is the worker's recorded result commit" \
+  "$TOOL_ROOT/prompts/roles/squad-leader.prompt" \
+  || fail "squad-leader prompt must explain the recorded-result rework exception"
+grep -qF "leader contract blocks every other commit" \
+  "$TOOL_ROOT/prompts/roles/squad-leader.prompt" \
+  || fail "squad-leader prompt must explain the contract boundary"
+ok "squad-leader prompt documents the legal rework commit"
 
 step "installed prompts match their sources"
 # This repo dogfoods itself, so swarmforge/ holds installed copies of the
@@ -183,6 +204,39 @@ ok "shell-ready retry makes another agent start attempt"
 (cd "$RETRY_PROJECT" && \
   PATH="$RETRY_BIN:$PATH" RETRY_CALLS="$RETRY_CALLS" RETRY_STARTS="$RETRY_STARTS" \
   "$TOOL_ROOT/bin/swarm" down >/dev/null)
+
+step "squad up installs the leader contract and gates the live squadd daemon"
+S7_UP="$WORK/s7-up"
+S7_UP_BIN="$WORK/s7-up-bin"
+mkdir -p "$S7_UP" "$S7_UP_BIN"
+git -C "$S7_UP" init -qb main
+git -C "$S7_UP" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m initial
+cat > "$S7_UP_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1-} ${2-}" in
+  "workspace create") printf '{"result":{"workspace_id":"ws-s7"}}\n' ;;
+  "workspace close") printf '{"result":{}}\n' ;;
+  "agent list") printf '{"result":{"agents":[]}}\n' ;;
+  "tab create") printf '{"result":{"tab_id":"tab-s7","pane_id":"pane-s7"}}\n' ;;
+  "agent start"|"agent prompt") printf '{"result":{}}\n' ;;
+  *) printf 'unexpected fake herdr call: %s\n' "$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$S7_UP_BIN/herdr"
+(cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" squad up >/dev/null)
+S7_PID_FILE="$S7_UP/.swarmforge/squad/daemon/squadd.pid"
+for _ in $(seq 1 50); do [ -s "$S7_PID_FILE" ] && break; sleep 0.1; done
+[ -s "$S7_PID_FILE" ] || fail "launcher-started squadd wrote no pid file"
+S7_SQUADD_PID="$(cat "$S7_PID_FILE")"
+tr '\0' '\n' < "/proc/$S7_SQUADD_PID/environ" | grep -qx 'SWARMFORGE_SQUADD=1' \
+  || fail "launcher-started squadd lacks SWARMFORGE_SQUADD=1"
+cmp "$TOOL_ROOT/prompts/contracts/squad-leader.contract.edn" \
+  "$S7_UP/swarmforge/contracts/squad-leader.contract.edn" \
+  || fail "squad up did not install the stock leader contract"
+ok "squad up installs the contract and launches a gated daemon"
+(cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" down >/dev/null)
 
 step "review-gated Codex pack isolates both roles"
 REVIEW_PACK="$WORK/review-pack"
@@ -758,6 +812,60 @@ expect "contract: compliant commit queues" "HANDOFF QUEUED:" <<<"$OUT"
 rm -f draft.txt
 rm -rf "$CODER/swarmforge/contracts"
 
+step "squad-leader contract forbids authored, empty, and merge commits"
+printf 'squad-leader\tmaster\t%s\tsquad-leader\tsquad-leader\tclaude\ttask\n' "$CODER" \
+  >> "$PROJECT/.swarmforge/roles.tsv"
+mkdir -p "$CODER/swarmforge/contracts"
+cp "$TOOL_ROOT/prompts/contracts/squad-leader.contract.edn" \
+  "$CODER/swarmforge/contracts/squad-leader.contract.edn"
+echo leader > leader-new.txt && git add leader-new.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "leader authored commit"
+LEADER_NEW="$(git rev-parse --short=10 HEAD)"
+git -c user.email=smoke@test -c user.name=smoke commit -q --allow-empty -m "leader empty commit"
+LEADER_EMPTY="$(git rev-parse --short=10 HEAD)"
+LEADER_BRANCH="$(git branch --show-current)"
+git checkout -qb s7-leader-side
+echo side > leader-side.txt && git add leader-side.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "leader side commit"
+git checkout -q "$LEADER_BRANCH"
+echo main > leader-main.txt && git add leader-main.txt
+git -c user.email=smoke@test -c user.name=smoke commit -qm "leader main commit"
+git -c user.email=smoke@test -c user.name=smoke merge -q --no-ff s7-leader-side -m "leader merge commit"
+LEADER_MERGE="$(git rev-parse --short=10 HEAD)"
+git branch -q -D s7-leader-side
+for leader_case in "fresh:$LEADER_NEW" "empty:$LEADER_EMPTY" "merge:$LEADER_MERGE"; do
+  leader_label="${leader_case%%:*}"
+  leader_commit="${leader_case#*:}"
+  printf 'type: git_handoff\nto: cleaner\npriority: 50\ntask: leader-%s\ncommit: %s\n' \
+    "$leader_label" "$leader_commit" > leader-draft.txt
+  set +e
+  OUT="$(SWARMFORGE_ROLE=squad-leader "$SCRIPTS/swarm_handoff.sh" leader-draft.txt 2>&1)"
+  STATUS=$?
+  set -e
+  [ "$STATUS" -eq 2 ] || fail "$leader_label leader commit should be forbidden, got $STATUS"
+  expect "$leader_label leader commit forbidden" "contract forbids handing off new commits" <<<"$OUT"
+  [ -f leader-draft.txt ] || fail "forbidden $leader_label draft must be retained"
+  rm leader-draft.txt
+done
+
+step "squad-leader contract permits records, recorded-result rework, and notes"
+echo "Leader may write records." > leader-instructions.md
+SWARMFORGE_ROLE=squad-leader "$SCRIPTS/squad_assign.sh" \
+  create s7rework implementer leader-instructions.md > /dev/null
+printf 'type: git_handoff\nfrom: worker\ncommit: %s\n' "$GOOD" > leader-result.handoff
+SWARMFORGE_ROLE=squad-leader "$SCRIPTS/squad_assign.sh" \
+  result s7rework leader-result.handoff > /dev/null
+printf 'type: git_handoff\nto: cleaner\npriority: 50\ntask: s7rework\ncommit: %s\n' \
+  "$GOOD" > leader-draft.txt
+OUT="$(SWARMFORGE_ROLE=squad-leader "$SCRIPTS/swarm_handoff.sh" leader-draft.txt)"
+expect "recorded worker result may be re-sent" "HANDOFF QUEUED:" <<<"$OUT"
+printf 'type: note\nto: cleaner\npriority: 50\nmessage: leader note remains legal\n' \
+  > leader-note.txt
+OUT="$(SWARMFORGE_ROLE=squad-leader "$SCRIPTS/swarm_handoff.sh" leader-note.txt)"
+expect "leader note remains legal" "HANDOFF QUEUED:" <<<"$OUT"
+rm -f leader-instructions.md leader-result.handoff
+rm -rf "$CODER/swarmforge/contracts"
+
 step "squad: hostile worker names are rejected before path resolution"
 set +e
 OUT="$("$SCRIPTS/squad_worker.sh" retire '../assignments/a1/status' 2>&1)"
@@ -790,6 +898,47 @@ expect "result transition" "ASSIGNMENT_STATE: a1 created -> result" <<<"$OUT"
 ok "result handoff stored"
 OUT="$("$SCRIPTS/squad_assign.sh" accept a1)"
 expect "accept transition" "ASSIGNMENT_STATE: a1 result -> accepted" <<<"$OUT"
+
+step "squad: daemon-only merge transitions fail closed before record access"
+S7_EVENTS_BEFORE="$(wc -l < .swarmforge/squad/events.log)"
+for gated_case in "unset:merge:a1" "blank:merge:a1" \
+                  "unset:merge-blocked:a1" "blank:merge-blocked:a1" \
+                  "unset:merge:missing-s7"; do
+  gate_value="${gated_case%%:*}"
+  gated_rest="${gated_case#*:}"
+  gated_command="${gated_rest%%:*}"
+  gated_id="${gated_rest#*:}"
+  gated_args=("$gated_id")
+  [ "$gated_command" = merge ] || gated_args+=(detail)
+  set +e
+  if [ "$gate_value" = blank ]; then
+    OUT="$(SWARMFORGE_SQUADD='' "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)"
+  else
+    OUT="$(env -u SWARMFORGE_SQUADD "$SCRIPTS/squad_assign.sh" "$gated_command" "${gated_args[@]}" 2>&1)"
+  fi
+  STATUS=$?
+  set -e
+  [ "$STATUS" -eq 2 ] || fail "$gated_command with $gate_value gate should exit 2, got $STATUS"
+  [[ "$(head -n1 <<<"$OUT")" == "DAEMON_ONLY: $gated_command "* ]] \
+    || { echo "$OUT"; fail "$gated_command must report DAEMON_ONLY first"; }
+done
+grep -q ':state :accepted' .swarmforge/squad/assignments/a1/status.edn \
+  || fail "refused daemon-only transition changed a1"
+[ "$(wc -l < .swarmforge/squad/events.log)" -eq "$S7_EVENTS_BEFORE" ] \
+  || fail "refused daemon-only transitions appended events"
+ok "merge gates reject unset/blank callers before touching records"
+
+step "squad: presented daemon gate preserves transition behavior"
+for gated_id in a5 a6; do
+  "$SCRIPTS/squad_assign.sh" create "$gated_id" implementer instructions.md > /dev/null
+  "$SCRIPTS/squad_assign.sh" result "$gated_id" worker.handoff > /dev/null
+  "$SCRIPTS/squad_assign.sh" accept "$gated_id" > /dev/null
+done
+OUT="$(SWARMFORGE_SQUADD=1 "$SCRIPTS/squad_assign.sh" merge a5)"
+expect "gated merge keeps transition token" "ASSIGNMENT_STATE: a5 accepted -> merged" <<<"$OUT"
+OUT="$(SWARMFORGE_SQUADD=1 "$SCRIPTS/squad_assign.sh" merge-blocked a6 conflict detail)"
+expect "gated merge-blocked keeps transition token" \
+  "ASSIGNMENT_STATE: a6 accepted -> merge-blocked" <<<"$OUT"
 
 step "squad: reject records the reason"
 "$SCRIPTS/squad_assign.sh" create a2 implementer instructions.md > /dev/null
@@ -1731,7 +1880,7 @@ ok "squadd-retire-worker logged"
 
 step "squadd: merged state rejects further transitions"
 set +e
-OUT="$("$SCRIPTS/squad_assign.sh" merge d1 2>&1)"
+OUT="$(SWARMFORGE_SQUADD=1 "$SCRIPTS/squad_assign.sh" merge d1 2>&1)"
 STATUS=$?
 set -e
 [ "$STATUS" -eq 2 ] || fail "re-merge should exit 2, got $STATUS"

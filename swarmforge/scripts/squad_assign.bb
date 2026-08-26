@@ -118,10 +118,18 @@
   (transition! id :rejected {:extra {:reason reason}
                              :detail (str "reason=" reason)}))
 
+(defn- require-daemon! [subcommand]
+  (when (str/blank? (System/getenv "SWARMFORGE_SQUADD"))
+    (handoff-lib/die 2
+                     (str "DAEMON_ONLY: " subcommand
+                          " is daemon-only; squadd applies accepted verdicts itself"))))
+
 (defn merge! [id]
+  (require-daemon! "merge")
   (transition! id :merged {}))
 
 (defn merge-blocked! [id detail]
+  (require-daemon! "merge-blocked")
   (transition! id :merge-blocked {:extra {:reason detail}
                                   :detail (str "detail=" detail)}))
 
