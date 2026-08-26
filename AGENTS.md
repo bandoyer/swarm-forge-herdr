@@ -77,6 +77,8 @@ pin `cd` explicitly (session cwd resets) and accept states idle OR done.
 
 ## Related
 
+- Latest operator handoff for a new session:
+  `docs/experiments/handoff-2026-08-26.md`
 - `~/Work/swarm-dogfood` — local-only .NET test project (packs + squad
   validated there). `~/Work/crap4net` → github.com/bandoyer/crap4net
   (split out; referenced by the dotnet toolset).
