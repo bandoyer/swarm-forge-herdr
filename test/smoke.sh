@@ -1974,21 +1974,6 @@ worker_state "$WA2" | grep -q ':retired' || {
 ok "unreachable poll does not advance or reset the streak"
 stop_squadd
 
-step "squadd: unusable agent list is herdr-unreachable"
-printf 'unusable\n' > "$REC_MODE"
-mkdir -p .swarmforge/squad/daemon
-rm -f .swarmforge/squad/daemon/stop
-: > .swarmforge/squad/daemon/squadd.log
-PATH="$REC_BIN:$PATH" \
-  SWARM_BIN="$TOOL_ROOT/bin/swarm" \
-  SWARMFORGE_NO_AGENT=1 \
-  SWARMFORGE_WAKE_CMD=none \
-  REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" REC_BODY="$REC_BODY" \
-  bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" --once
-grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
-  || { cat .swarmforge/squad/daemon/squadd.log; fail "unusable list should log herdr-unreachable"; }
-ok "unusable agent list is treated as herdr-unreachable"
-
 run_squadd_once() {
   mkdir -p .swarmforge/squad/daemon
   rm -f .swarmforge/squad/daemon/stop
@@ -2000,6 +1985,22 @@ run_squadd_once() {
     REC_CALLS="$REC_CALLS" REC_MODE="$REC_MODE" REC_AGENTS="$REC_AGENTS" REC_BODY="$REC_BODY" \
     bb "$TOOL_ROOT/swarmforge/scripts/squadd.bb" "$REC" --once
 }
+
+step "squadd: unusable agent list is herdr-unreachable"
+printf 'unusable\n' > "$REC_MODE"
+run_squadd_once
+grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log \
+  || { cat .swarmforge/squad/daemon/squadd.log; fail "unusable list should log herdr-unreachable"; }
+ok "unusable agent list is treated as herdr-unreachable"
+
+MALFORMED_AGENT_CASES=(
+  'missing agents collection|{"result":{}}'
+  'agents is not a collection|{"result":{"agents":{"name":"x"}}}'
+  'nameless member|{"result":{"agents":[{}]}}'
+  'non-string name|{"result":{"agents":[{"name":1}]}}'
+  'blank name|{"result":{"agents":[{"name":""}]}}'
+  'mixture of valid and malformed members|{"result":{"agents":[{"name":"WORKER_NAME"},{}]}}'
+)
 expect_skip_body() { # expect_skip_body <label> <json>
   printf 'body\n' > "$REC_MODE"
   printf '%s\n' "$2" > "$REC_BODY"
@@ -2010,13 +2011,10 @@ expect_skip_body() { # expect_skip_body <label> <json>
 }
 
 step "squadd: malformed agent collections fail closed (unusable-response matrix)"
-expect_skip_body "missing agents collection" '{"result":{}}'
-expect_skip_body "agents is not a collection" '{"result":{"agents":{"name":"x"}}}'
-expect_skip_body "nameless member" '{"result":{"agents":[{}]}}'
-expect_skip_body "non-string name" '{"result":{"agents":[{"name":1}]}}'
-expect_skip_body "blank name" '{"result":{"agents":[{"name":""}]}}'
-expect_skip_body "mixture of valid and malformed members" \
-  '{"result":{"agents":[{"name":"alive"},{}]}}'
+for malformed_case in "${MALFORMED_AGENT_CASES[@]}"; do
+  IFS='|' read -r agent_case_label agent_case_body <<< "$malformed_case"
+  expect_skip_body "$agent_case_label" "${agent_case_body/WORKER_NAME/alive}"
+done
 printf 'missing\n' > "$REC_MODE"
 run_squadd_once
 if grep -q 'reconcile-skipped herdr-unreachable' .swarmforge/squad/daemon/squadd.log; then
@@ -2057,13 +2055,12 @@ assert_still_active_after_body() { # assert_still_active_after_body <label> <jso
   BASE_SKIPS=$after
   ok "$1 leaves artifacts and the miss streak unchanged"
 }
-assert_still_active_after_body "missing agents collection" '{"result":{}}'
-assert_still_active_after_body "agents is not a collection" '{"result":{"agents":{"name":"x"}}}'
-assert_still_active_after_body "nameless member" '{"result":{"agents":[{}]}}'
-assert_still_active_after_body "non-string name" '{"result":{"agents":[{"name":1}]}}'
-assert_still_active_after_body "blank name" '{"result":{"agents":[{"name":""}]}}'
-assert_still_active_after_body "mixture including the live worker name" \
-  "{\"result\":{\"agents\":[{\"name\":\"$WA3\"},{}]}}"
+for malformed_case in "${MALFORMED_AGENT_CASES[@]}"; do
+  IFS='|' read -r agent_case_label agent_case_body <<< "$malformed_case"
+  [ "$agent_case_label" != "mixture of valid and malformed members" ] \
+    || agent_case_label="mixture including the live worker name"
+  assert_still_active_after_body "$agent_case_label" "${agent_case_body/WORKER_NAME/$WA3}"
+done
 printf 'missing\n' > "$REC_MODE"
 wait_lists $(( $(list_count) + 1 ))
 sleep 0.8

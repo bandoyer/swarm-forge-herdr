@@ -324,10 +324,11 @@
   maps without those fields are unusable — the caller fail-closes the
   whole observation rather than dropping this member."
   [agent]
-  (let [n (cond
-            (string? agent) agent
-            (map? agent) (or (:name agent) (:label agent)))]
-    (when (and (string? n) (not (str/blank? n))) n)))
+  (let [agent-name (cond
+                     (string? agent) agent
+                     (map? agent) (or (:name agent) (:label agent)))]
+    (when (and (string? agent-name) (not (str/blank? agent-name)))
+      agent-name)))
 
 (defn- parse-agent-names
   "Live agent-name set from a successful `herdr agent list` body, or nil
