@@ -27,17 +27,17 @@ step "agent session guides stay synchronized"
 diff -u "$TOOL_ROOT/CLAUDE.md" "$TOOL_ROOT/AGENTS.md" \
   || fail "CLAUDE.md and AGENTS.md drifted; Grok discovers both"
 ok "Claude, Codex, and Grok receive the same repository operations guide"
-for g in AGENTS.md CLAUDE.md; do
-  grep -qF '10+3' "$TOOL_ROOT/$g" \
-    && fail "$g still claims the 10+3-row advisor table is exhaustive"
-  grep -q '14-row' "$TOOL_ROOT/$g" \
-    || fail "$g must describe the complete 14-row advisor table"
-  grep -q 'squad-s3.md' "$TOOL_ROOT/$g" \
-    || fail "$g must cite docs/squad-s3.md for rows 1-10"
-  grep -q 'squad-s4.md' "$TOOL_ROOT/$g" \
-    || fail "$g must cite docs/squad-s4.md for rows 11-13"
-  grep -q 'squad-hardening-s5-spec.md' "$TOOL_ROOT/$g" \
-    || fail "$g must cite docs/squad-hardening-s5-spec.md for row 14"
+for guide in AGENTS.md CLAUDE.md; do
+  grep -qF '10+3' "$TOOL_ROOT/$guide" \
+    && fail "$guide still claims the 10+3-row advisor table is exhaustive"
+  grep -q '14-row' "$TOOL_ROOT/$guide" \
+    || fail "$guide must describe the complete 14-row advisor table"
+  grep -q 'squad-s3.md' "$TOOL_ROOT/$guide" \
+    || fail "$guide must cite docs/squad-s3.md for rows 1-10"
+  grep -q 'squad-s4.md' "$TOOL_ROOT/$guide" \
+    || fail "$guide must cite docs/squad-s4.md for rows 11-13"
+  grep -q 'squad-hardening-s5-spec.md' "$TOOL_ROOT/$guide" \
+    || fail "$guide must cite docs/squad-hardening-s5-spec.md for row 14"
 done
 ok "session guides describe the complete 14-row advisor table"
 
@@ -2134,46 +2134,46 @@ ok "launch grace holds a young allocated worker; aged allocated follows K=3"
 stop_squadd
 
 step "squadd: a herdr :label matches the worker name (existing-agents shape)"
-WAL=r5-implementer-lbl1
-plant_active "$WAL" lbl1
+LABEL_WORKER=r5-implementer-lbl1
+plant_active "$LABEL_WORKER" lbl1
 printf 'missing\n' > "$REC_MODE"
 start_squadd
 wait_lists 2
 sleep 0.4
-worker_state "$WAL" | grep -q ':active' || fail "label probe setup: two misses must not retire $WAL"
-printf '%s\n' "$WAL" > "$REC_AGENTS"
+worker_state "$LABEL_WORKER" | grep -q ':active' || fail "label probe setup: two misses must not retire $LABEL_WORKER"
+printf '%s\n' "$LABEL_WORKER" > "$REC_AGENTS"
 printf 'present-label\n' > "$REC_MODE"
 wait_lists 3
 sleep 0.4
-worker_state "$WAL" | grep -q ':active' || fail "a :label observation must keep $WAL active"
+worker_state "$LABEL_WORKER" | grep -q ':active' || fail "a :label observation must keep $LABEL_WORKER active"
 printf 'missing\n' > "$REC_MODE"
 wait_lists 5
 sleep 0.4
-worker_state "$WAL" | grep -q ':active' || fail ":label presence must reset the miss streak; two later misses must not retire"
-if grep -q "worker-lost $WAL" .swarmforge/squad/events.log 2>/dev/null; then
+worker_state "$LABEL_WORKER" | grep -q ':active' || fail ":label presence must reset the miss streak; two later misses must not retire"
+if grep -q "worker-lost $LABEL_WORKER" .swarmforge/squad/events.log 2>/dev/null; then
   fail "reset via :label must not log worker-lost"
 fi
 ok "herdr agent :label is a live name and resets the streak"
 stop_squadd
 
 step "squadd: a string agent-list member is a live name"
-WAS=r5-implementer-str1
-plant_active "$WAS" str1
+STRING_WORKER=r5-implementer-str1
+plant_active "$STRING_WORKER" str1
 printf 'missing\n' > "$REC_MODE"
 start_squadd
 wait_lists 2
 sleep 0.4
-worker_state "$WAS" | grep -q ':active' || fail "string-member setup: two misses must not retire $WAS"
+worker_state "$STRING_WORKER" | grep -q ':active' || fail "string-member setup: two misses must not retire $STRING_WORKER"
 printf 'body\n' > "$REC_MODE"
-printf '{"result":{"agents":["%s"]}}\n' "$WAS" > "$REC_BODY"
+printf '{"result":{"agents":["%s"]}}\n' "$STRING_WORKER" > "$REC_BODY"
 wait_lists 3
 sleep 0.4
-worker_state "$WAS" | grep -q ':active' || fail "a string member observation must keep $WAS active"
+worker_state "$STRING_WORKER" | grep -q ':active' || fail "a string member observation must keep $STRING_WORKER active"
 printf 'missing\n' > "$REC_MODE"
 wait_lists 5
 sleep 0.4
-worker_state "$WAS" | grep -q ':active' || fail "string-member presence must reset the miss streak; two later misses must not retire"
-if grep -q "worker-lost $WAS" .swarmforge/squad/events.log 2>/dev/null; then
+worker_state "$STRING_WORKER" | grep -q ':active' || fail "string-member presence must reset the miss streak; two later misses must not retire"
+if grep -q "worker-lost $STRING_WORKER" .swarmforge/squad/events.log 2>/dev/null; then
   fail "reset via string member must not log worker-lost"
 fi
 ok "string agent-list member is a live name and resets the streak"
