@@ -152,17 +152,20 @@
 
 (defn spawn! [{:keys [target]}]
   (let [request-file (fs/path squad-dir "spawn-requests" (str target ".edn"))
-        {:keys [template kind]} (when (fs/exists? request-file)
-                                  (edn/read-string (slurp (str request-file))))]
+        {:keys [template kind model effort]} (when (fs/exists? request-file)
+                                               (edn/read-string (slurp (str request-file))))]
     (if (str/blank? (str template))
       (log! "spawn-skipped" target "spawn-request record missing or has no template")
       (let [{:keys [exit] :as result}
             (apply sh (concat swarm-cmd ["squad" "spawn" target template]
-                              (when kind [kind]) no-agent-args))]
+                              (keep identity [kind model effort]) no-agent-args))]
         (if (zero? exit)
           (do (bb-script "squad_spawn_request.bb" "drop" target)
               (event! target "squadd-spawn"
-                      (str "template=" template (when kind (str " kind=" kind))))
+                      (str "template=" template
+                           (when kind (str " kind=" kind))
+                           (when model (str " model=" model))
+                           (when effort (str " effort=" effort))))
               (log! "spawned" target template))
           ;; Leave the request in place: the next poll retries the spawn.
           (log! "spawn-failed" target (failure-text result)))))))

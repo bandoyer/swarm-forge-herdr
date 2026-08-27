@@ -6,8 +6,9 @@
 ;; Lifecycle: allocated -> active -> retired (retire is also allowed
 ;; straight from allocated, for workers that never spawn). Capacity:
 ;; allocated+active workers are capped by max_transient_agents in
-;; swarmforge/squad.conf (default 10). Allocate is the single kind
-;; resolution point: explicit [kind], then worker_kind, then claude.
+;; swarmforge/squad.conf (default 10). Allocate is the single agent-profile
+;; resolution point: explicit profile, template profile, worker profile,
+;; worker_kind, then claude.
 ;; Illegal transitions exit 2 with an INVALID_TRANSITION token; unknown
 ;; workers report NO_SUCH_WORKER.
 
@@ -19,7 +20,7 @@
 
 (def usage-text
   (str "Usage: squad_worker.sh <subcommand> ...\n\n"
-       "  allocate <assignment-id> <template> [kind]\n"
+       "  allocate <assignment-id> <template> [kind [model effort]]\n"
        "  activate <worker-name>\n"
        "  retire <worker-name> [reason...]\n"
        "  list [--active]"))
@@ -75,10 +76,11 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn allocate! [assignment-id template explicit-kind]
-  (squad-lib/require-valid-agent-kind! explicit-kind)
-  ;; Resolve once at allocation: explicit arg, then worker_kind, then claude.
-  (let [agent-kind (or explicit-kind (squad-lib/configured-worker-kind))
+(defn allocate! [assignment-id template profile-values]
+  ;; Resolve once at allocation; every launch reader consumes this record.
+  (let [explicit-profile (squad-lib/explicit-agent-profile profile-values)
+        agent-profile (squad-lib/resolve-worker-profile template explicit-profile)
+        agent-kind (:kind agent-profile)
         project-name (fs/file-name (handoff-lib/project-root))
         worker (worker-name project-name template assignment-id)
         file (worker-file worker)
@@ -89,15 +91,15 @@
       (handoff-lib/die 2 (format "CAPACITY_EXHAUSTED: %d active workers, max_transient_agents %d"
                                  (squad-lib/active-count) cap)))
     (fs/create-dirs (squad-lib/workers-dir))
-    (squad-lib/write-record! file {:name worker
-                                   :template template
-                                   :assignment assignment-id
-                                   :agent-kind agent-kind
-                                   :state :allocated
-                                   :created-at (handoff-lib/iso-now)})
+    (squad-lib/write-record! file (merge {:name worker
+                                          :template template
+                                          :assignment assignment-id
+                                          :state :allocated
+                                          :created-at (handoff-lib/iso-now)}
+                                         (squad-lib/agent-profile-fields agent-profile)))
     (squad-lib/log-event! worker "allocated"
                           (str "template=" template " assignment=" assignment-id
-                               " kind=" agent-kind))
+                               " " (squad-lib/agent-profile-detail agent-profile)))
     (println (str "WORKER_ALLOCATED: " worker))))
 
 (defn activate! [worker-name]
@@ -113,8 +115,10 @@
   (let [workers (squad-lib/all-workers)
         active (filter #(squad-lib/active-states (:state %)) workers)
         shown (if active-only? active workers)]
-    (doseq [{worker :name :keys [state template assignment]} shown]
-      (println worker (name state) template assignment))
+    (doseq [{worker :name :keys [state template assignment agent-model agent-effort]} shown]
+      (println (str/join " " (cond-> [worker (name state) template assignment]
+                               agent-model (conj (str "model=" agent-model)
+                                                 (str "effort=" agent-effort))))))
     (println (str "ACTIVE: " (count active) "/" (squad-lib/max-transient-agents)))))
 
 ;; --- entry ----------------------------------------------------------------
@@ -126,8 +130,8 @@
   (let [[command & params] args
         params (vec params)]
     (case command
-      "allocate" (if (<= 2 (count params) 3)
-                   (allocate! (nth params 0) (nth params 1) (nth params 2 nil))
+      "allocate" (if (#{2 3 5} (count params))
+                   (allocate! (nth params 0) (nth params 1) (drop 2 params))
                    (usage-die))
       "activate" (if (= 1 (count params)) (activate! (first params)) (usage-die))
       "retire" (if (<= 1 (count params))

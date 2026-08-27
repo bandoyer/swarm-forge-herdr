@@ -212,11 +212,30 @@ example:
 max_transient_agents 4
 max_merger_depth 2
 require_approval merge
+leader_profile codex gpt-5.6-sol max
+worker_profile codex gpt-5.6-sol high
+template_profile cleaner grok grok-4.6 high
+template_profile qa codex gpt-5.6-sol xhigh
 ```
 
 `max_transient_agents` defaults to 10 and `max_merger_depth` defaults to 2.
 Omit `require_approval merge` for automatic daemon-owned merges. If the
 project's integration branch is not `main`, add `main_branch <name>`.
+
+Agent profiles have the shape `<kind> <model> <effort>`. Leader resolution is
+an explicit `squad up` profile, then `leader_profile`, then kind-only Claude.
+Worker resolution is an explicit assignment profile, a matching
+`template_profile`, `worker_profile`, legacy `worker_kind`, then kind-only
+Claude. Resolution is written to the leader or worker record before launch,
+so later configuration changes cannot silently relabel a live agent. Pinned
+profiles support `codex`, `claude`, and `grok`; kind-only profiles retain
+Herdr's CLI defaults and remain open to other safe kinds.
+
+Pinned arguments are passed after Herdr's `--`: Codex receives
+`--model MODEL -c model_reasoning_effort=EFFORT`, Claude receives
+`--model MODEL --effort EFFORT`, and Grok receives
+`--model MODEL --reasoning-effort EFFORT`. `swarm status`, worker records, and
+the event log show the resolved pins. Kind-only output keeps its legacy shape.
 
 Start Herdr first, then start the squad from a Herdr pane:
 
@@ -225,8 +244,9 @@ herdr
 ```
 
 ```sh
-swarm squad up            # defaults the leader to Claude
-# or: swarm squad up codex # Codex leader; transient workers still use Claude
+swarm squad up                              # use project policy/defaults
+swarm squad up codex                        # kind-only; use Codex CLI defaults
+swarm squad up codex gpt-5.6-sol max        # explicit reproducible profile
 ```
 
 Talk to the squad-leader pane like a colleague. `swarm squad up` also prints

@@ -137,9 +137,16 @@ Designs, nothing built yet:
 
 - [x] Quality bars: universal = fast suite only; cleaner contract no
       longer demands CRAP/jscpd receipts — `docs/quality-bars.md`
-- [ ] S5 dead-worker reconciliation (issue #2) — `docs/squad-hardening.md`
-- [ ] S6 worker agent kind is data (unblocks Grok/Codex squad workers)
-- [ ] S7a daemon-only env gate; S7b leader contract
+- [x] S5 dead-worker reconciliation (2026-08-25, issue #2) —
+      `docs/squad-hardening-s5-spec.md`
+- [x] S6 worker agent kind is data (2026-08-26) —
+      `docs/squad-hardening-s6-spec.md`
+- [x] S7a daemon-only env gate; S7b leader contract (2026-08-26) —
+      `docs/squad-hardening-s7-spec.md`
+- [x] S6b deterministic squad agent profiles (2026-08-27): project policy
+      pins leader/default/template/assignment kind, model, and effort;
+      durable records remain the launch source; legacy kind-only squads stay
+      compatible — `docs/squad-agent-profiles-spec.md` (375 smoke checks)
 - [ ] S8 atomic records + stale sequence.lock recovery
 - [x] Consolidate the experimental pack matrix into `six-all` and `six-cg`.
 

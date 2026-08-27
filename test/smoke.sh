@@ -64,6 +64,21 @@ grep -qF "leader contract blocks every other commit" \
   || fail "squad-leader prompt must explain the contract boundary"
 ok "squad-leader prompt documents the legal rework commit"
 
+step "squad profiles: provider launch arguments are exact argv"
+PROFILE_ARGV="$(bb -e "(load-file \"$TOOL_ROOT/swarmforge/scripts/squad_lib.bb\")
+(doseq [profile [{:kind \"codex\" :model \"gpt-5.6-sol\" :effort \"max\"}
+                 {:kind \"claude\" :model \"claude-fable-5\" :effort \"high\"}
+                 {:kind \"grok\" :model \"grok-4.6\" :effort \"xhigh\"}
+                 {:kind \"custom\"}]]
+  (println (pr-str (squad-lib/agent-launch-args profile))))")"
+expect "Codex profile maps model and reasoning effort" \
+  '["--model" "gpt-5.6-sol" "-c" "model_reasoning_effort=max"]' <<<"$PROFILE_ARGV"
+expect "Claude profile maps model and effort" \
+  '["--model" "claude-fable-5" "--effort" "high"]' <<<"$PROFILE_ARGV"
+expect "Grok profile maps model and reasoning effort" \
+  '["--model" "grok-4.6" "--reasoning-effort" "xhigh"]' <<<"$PROFILE_ARGV"
+expect "kind-only profile adds no provider argv" '[]' <<<"$PROFILE_ARGV"
+
 step "installed prompts match their sources"
 # This repo dogfoods itself, so swarmforge/ holds installed copies of the
 # stock prompts. Drift there means a fix landed in prompts/ and never
@@ -254,6 +269,126 @@ grep -qxF '{:artifact-roots ["docs/"]}' \
   || fail "squad up must not overwrite an existing leader contract"
 ok "squad up leaves an existing leader contract in place"
 (cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" down >/dev/null)
+
+step "squad profiles: leader config, explicit precedence, and live stability"
+LEADER_PROFILE="$WORK/leader-profile"
+LEADER_PROFILE_BIN="$WORK/leader-profile-bin"
+LEADER_PROFILE_CALLS="$WORK/leader-profile.calls"
+LEADER_PROFILE_RUNNING="$WORK/leader-profile.running"
+LEADER_PROFILE_AGENT=leader-profile-squad-leader
+mkdir -p "$LEADER_PROFILE/swarmforge" "$LEADER_PROFILE_BIN"
+git -C "$LEADER_PROFILE" init -qb main
+git -C "$LEADER_PROFILE" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m initial
+cat > "$LEADER_PROFILE/swarmforge/squad.conf" <<'EOF'
+leader_profile codex gpt-5.6-sol max
+worker_profile codex gpt-5.6-sol high
+EOF
+: > "$LEADER_PROFILE_CALLS"
+cat > "$LEADER_PROFILE_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$PROFILE_CALLS"
+case "${1-} ${2-}" in
+  "workspace create") printf '{"result":{"workspace_id":"ws-profile"}}\n' ;;
+  "workspace get") printf '{"result":{"workspace_id":"ws-profile"}}\n' ;;
+  "workspace close") rm -f "$PROFILE_RUNNING"; printf '{"result":{}}\n' ;;
+  "agent list")
+    if [ -f "$PROFILE_RUNNING" ]; then
+      printf '{"result":{"agents":[{"name":"%s"}]}}\n' "$PROFILE_AGENT"
+    else
+      printf '{"result":{"agents":[]}}\n'
+    fi
+    ;;
+  "tab create") printf '{"result":{"tab_id":"tab-profile","pane_id":"pane-profile"}}\n' ;;
+  "tab close") printf '{"result":{}}\n' ;;
+  "agent start") : > "$PROFILE_RUNNING"; printf '{"result":{}}\n' ;;
+  "agent prompt") printf '{"result":{}}\n' ;;
+  *) printf 'unexpected fake herdr call: %s\n' "$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$LEADER_PROFILE_BIN/herdr"
+leader_profile_swarm() {
+  (cd "$LEADER_PROFILE" && \
+    PATH="$LEADER_PROFILE_BIN:$PATH" PROFILE_CALLS="$LEADER_PROFILE_CALLS" \
+    PROFILE_RUNNING="$LEADER_PROFILE_RUNNING" PROFILE_AGENT="$LEADER_PROFILE_AGENT" \
+    "$TOOL_ROOT/bin/swarm" "$@")
+}
+leader_profile_swarm squad up >/dev/null
+LEADER_RECORD="$LEADER_PROFILE/.swarmforge/squad/leader.edn"
+grep -q ':agent-kind "codex"' "$LEADER_RECORD" || fail "configured leader kind not recorded"
+grep -q ':agent-model "gpt-5.6-sol"' "$LEADER_RECORD" || fail "configured leader model not recorded"
+grep -q ':agent-effort "max"' "$LEADER_RECORD" || fail "configured leader effort not recorded"
+grep -qFx 'agent start leader-profile-squad-leader --kind codex --pane pane-profile -- --model gpt-5.6-sol -c model_reasoning_effort=max' \
+  "$LEADER_PROFILE_CALLS" || fail "configured leader did not reach exact Codex argv"
+[ "$(awk -F '\t' '$1 == "squad-leader" {print $6}' "$LEADER_PROFILE/.swarmforge/roles.tsv")" = codex ] \
+  || fail "configured leader kind not registered"
+OUT="$(cd "$LEADER_PROFILE" && "$TOOL_ROOT/bin/swarm" status)"
+expect "pinned leader appears in status" "model=gpt-5.6-sol effort=max" <<<"$OUT"
+ok "configured leader profile is durable and reaches Herdr"
+echo "Launch a pinned worker." > "$LEADER_PROFILE/leader-worker.md"
+(cd "$LEADER_PROFILE" && \
+  swarmforge/scripts/squad_assign.sh create lpw1 implementer leader-worker.md >/dev/null)
+OUT="$(leader_profile_swarm squad spawn lpw1 implementer)"
+LEADER_PROFILE_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+LEADER_PROFILE_WORKER_RECORD="$LEADER_PROFILE/.swarmforge/squad/workers/$LEADER_PROFILE_WORKER.edn"
+grep -q ':agent-model "gpt-5.6-sol"' "$LEADER_PROFILE_WORKER_RECORD" \
+  || fail "configured worker model not recorded"
+grep -q ':agent-effort "high"' "$LEADER_PROFILE_WORKER_RECORD" \
+  || fail "configured worker effort not recorded"
+grep -qFx "agent start $LEADER_PROFILE_WORKER --kind codex --pane pane-profile -- --model gpt-5.6-sol -c model_reasoning_effort=high" \
+  "$LEADER_PROFILE_CALLS" || fail "configured worker did not reach exact Codex argv"
+OUT="$(cd "$LEADER_PROFILE" && "$TOOL_ROOT/bin/swarm" status)"
+expect "pinned worker appears in status" "model=gpt-5.6-sol effort=high" <<<"$OUT"
+ok "worker profile reaches Herdr from its durable record"
+leader_profile_swarm squad retire "$LEADER_PROFILE_WORKER" verified >/dev/null
+LEADER_RECORD_HASH="$(sha256sum "$LEADER_RECORD" | cut -d' ' -f1)"
+printf 'leader_profile claude claude-fable-5 high\n' > "$LEADER_PROFILE/swarmforge/squad.conf"
+leader_profile_swarm squad up grok grok-4.6 high >/dev/null
+[ "$LEADER_RECORD_HASH" = "$(sha256sum "$LEADER_RECORD" | cut -d' ' -f1)" ] \
+  || fail "running leader profile was rewritten"
+[ "$(awk -F '\t' '$1 == "squad-leader" {print $6}' "$LEADER_PROFILE/.swarmforge/roles.tsv")" = codex ] \
+  || fail "running leader registration was relabeled"
+[ "$(grep -c '^agent start leader-profile-squad-leader ' "$LEADER_PROFILE_CALLS")" -eq 1 ] \
+  || fail "running leader was started a second time"
+ok "running leader keeps its durable and registered profile"
+leader_profile_swarm down >/dev/null
+leader_profile_swarm squad up grok grok-4.6 xhigh >/dev/null
+grep -q ':agent-kind "grok"' "$LEADER_RECORD" || fail "explicit leader kind did not win"
+grep -q ':agent-model "grok-4.6"' "$LEADER_RECORD" || fail "explicit leader model did not win"
+grep -q ':agent-effort "xhigh"' "$LEADER_RECORD" || fail "explicit leader effort did not win"
+grep -qFx 'agent start leader-profile-squad-leader --kind grok --pane pane-profile -- --model grok-4.6 --reasoning-effort xhigh' \
+  "$LEADER_PROFILE_CALLS" || fail "explicit leader did not reach exact Grok argv"
+ok "explicit full leader profile beats project configuration"
+leader_profile_swarm down >/dev/null
+leader_profile_swarm squad up codex >/dev/null
+grep -q ':agent-kind "codex"' "$LEADER_RECORD" || fail "kind-only leader override missing kind"
+if grep -q ':agent-model\|:agent-effort' "$LEADER_RECORD"; then
+  fail "kind-only leader override borrowed configured model or effort"
+fi
+grep -qFx 'agent start leader-profile-squad-leader --kind codex --pane pane-profile' \
+  "$LEADER_PROFILE_CALLS" || fail "kind-only leader added provider argv"
+ok "explicit kind-only leader keeps the provider CLI defaults"
+leader_profile_swarm down >/dev/null
+
+step "squad profiles: malformed leader config fails before state writes"
+BAD_LEADER_PROFILE="$WORK/bad-leader-profile"
+mkdir -p "$BAD_LEADER_PROFILE/swarmforge"
+git -C "$BAD_LEADER_PROFILE" init -qb main
+git -C "$BAD_LEADER_PROFILE" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m initial
+printf 'leader_profile codex gpt-5.6-sol\n' > "$BAD_LEADER_PROFILE/swarmforge/squad.conf"
+set +e
+OUT="$(cd "$BAD_LEADER_PROFILE" && "$TOOL_ROOT/bin/swarm" squad up 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "malformed leader profile should exit 2, got $STATUS"
+expect "malformed leader profile token" "INVALID_AGENT_PROFILE" <<<"$OUT"
+[ ! -e "$BAD_LEADER_PROFILE/.swarmforge/squad/leader.edn" ] \
+  || fail "malformed leader config wrote a leader record"
+[ ! -e "$BAD_LEADER_PROFILE/.swarmforge/roles.tsv" ] \
+  || fail "malformed leader config wrote role registration"
+ok "malformed leader profile is atomic"
 
 step "six-all pins the Fable, Codex, and Grok roles"
 SIX_ALL_PROJECT="$WORK/six-all-pack"
@@ -1180,6 +1315,114 @@ ok "kind shape allows hyphen, dot, and digit"
 "$SWARM" squad retire "$SHAPE_WORKER" done --no-agent > /dev/null
 rm -f kind.md
 
+step "squad profiles: worker defaults, template policy, and overrides"
+echo "Profiled worker." > profile.md
+cat > swarmforge/squad.conf <<'EOF'
+worker_profile codex gpt-5.6-sol high
+template_profile cleaner grok grok-4.6 high
+EOF
+"$SCRIPTS/squad_assign.sh" create spp1 implementer profile.md > /dev/null
+OUT="$("$SWARM" squad spawn spp1 implementer --no-agent)"
+PROFILE_DEFAULT_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+PROFILE_DEFAULT_RECORD=".swarmforge/squad/workers/$PROFILE_DEFAULT_WORKER.edn"
+grep -q ':agent-kind "codex"' "$PROFILE_DEFAULT_RECORD" || fail "worker_profile kind missing"
+grep -q ':agent-model "gpt-5.6-sol"' "$PROFILE_DEFAULT_RECORD" || fail "worker_profile model missing"
+grep -q ':agent-effort "high"' "$PROFILE_DEFAULT_RECORD" || fail "worker_profile effort missing"
+OUT="$("$SCRIPTS/squad_worker.sh" list)"
+expect "worker list shows pinned model and effort" "model=gpt-5.6-sol effort=high" <<<"$OUT"
+grep -q " $PROFILE_DEFAULT_WORKER allocated template=implementer assignment=spp1 kind=codex model=gpt-5.6-sol effort=high" \
+  .swarmforge/squad/events.log || fail "worker profile event detail is incomplete"
+ok "worker_profile persists full audit detail"
+"$SCRIPTS/squad_assign.sh" create spp2 cleaner profile.md > /dev/null
+OUT="$("$SWARM" squad spawn spp2 cleaner --no-agent)"
+PROFILE_TEMPLATE_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+PROFILE_TEMPLATE_RECORD=".swarmforge/squad/workers/$PROFILE_TEMPLATE_WORKER.edn"
+grep -q ':agent-kind "grok"' "$PROFILE_TEMPLATE_RECORD" || fail "template profile kind missing"
+grep -q ':agent-model "grok-4.6"' "$PROFILE_TEMPLATE_RECORD" || fail "template profile model missing"
+grep -q ':agent-effort "high"' "$PROFILE_TEMPLATE_RECORD" || fail "template profile effort missing"
+ok "template_profile beats worker_profile"
+"$SCRIPTS/squad_assign.sh" create spp3 cleaner profile.md > /dev/null
+OUT="$("$SWARM" squad spawn spp3 cleaner codex gpt-5.6-sol max --no-agent)"
+PROFILE_EXPLICIT_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+PROFILE_EXPLICIT_RECORD=".swarmforge/squad/workers/$PROFILE_EXPLICIT_WORKER.edn"
+grep -q ':agent-kind "codex"' "$PROFILE_EXPLICIT_RECORD" || fail "explicit profile kind missing"
+grep -q ':agent-model "gpt-5.6-sol"' "$PROFILE_EXPLICIT_RECORD" || fail "explicit profile model missing"
+grep -q ':agent-effort "max"' "$PROFILE_EXPLICIT_RECORD" || fail "explicit profile effort missing"
+ok "explicit full worker profile beats template policy"
+"$SCRIPTS/squad_assign.sh" create spp4 cleaner profile.md > /dev/null
+OUT="$("$SWARM" squad spawn spp4 cleaner grok --no-agent)"
+PROFILE_KIND_WORKER="$(grep -oE 'WORKER_SPAWNED: .*' <<<"$OUT" | cut -d' ' -f2)"
+PROFILE_KIND_RECORD=".swarmforge/squad/workers/$PROFILE_KIND_WORKER.edn"
+grep -q ':agent-kind "grok"' "$PROFILE_KIND_RECORD" || fail "kind-only override missing kind"
+if grep -q ':agent-model\|:agent-effort' "$PROFILE_KIND_RECORD"; then
+  fail "kind-only override borrowed configured model or effort"
+fi
+ok "kind-only override intentionally keeps CLI defaults"
+cat > swarmforge/squad.conf <<'EOF'
+worker_profile grok changed-model low
+template_profile cleaner claude changed-model low
+EOF
+OUT="$(bb -e "(binding [*command-line-args* [\"squad\" \"status\"]]
+  (load-file \"$SWARM\"))
+(let [profile ((ns-resolve 'swarm 'worker-agent-profile) \"$PROFILE_DEFAULT_WORKER\")]
+  (println \"RECORDED_ARGV:\"
+           ((ns-resolve 'swarm 'profile-start-argv)
+            \"$PROFILE_DEFAULT_WORKER\" profile \"pane-recorded\")))")"
+expect "launcher uses the worker record after config changes" \
+  "RECORDED_ARGV: [agent start $PROFILE_DEFAULT_WORKER --kind codex --pane pane-recorded -- --model gpt-5.6-sol -c model_reasoning_effort=high]" <<<"$OUT"
+for worker in "$PROFILE_DEFAULT_WORKER" "$PROFILE_TEMPLATE_WORKER" \
+              "$PROFILE_EXPLICIT_WORKER" "$PROFILE_KIND_WORKER"; do
+  "$SWARM" squad retire "$worker" done --no-agent > /dev/null
+done
+rm -f profile.md swarmforge/squad.conf
+
+step "squad profiles: invalid configuration and values write nothing"
+echo "Invalid profile." > bad-profile.md
+"$SCRIPTS/squad_assign.sh" create sppbad implementer bad-profile.md > /dev/null
+cat > swarmforge/squad.conf <<'EOF'
+worker_profile codex gpt-5.6-sol high
+worker_profile grok grok-4.6 high
+EOF
+BEFORE_WORKER_RECORDS="$(find .swarmforge/squad/workers -type f -name '*.edn' | wc -l)"
+set +e
+OUT="$("$SWARM" squad spawn sppbad implementer --no-agent 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "duplicate worker_profile should exit 2, got $STATUS"
+expect "duplicate worker profile token" "INVALID_AGENT_PROFILE" <<<"$OUT"
+[ "$BEFORE_WORKER_RECORDS" -eq "$(find .swarmforge/squad/workers -type f -name '*.edn' | wc -l)" ] \
+  || fail "duplicate worker_profile wrote a worker record"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create sppbad implementer 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 2 ] || fail "malformed config request should exit 2, got $STATUS"
+expect "malformed config blocks spawn request" "INVALID_AGENT_PROFILE" <<<"$OUT"
+[ ! -e .swarmforge/squad/spawn-requests/sppbad.edn ] \
+  || fail "malformed configuration wrote a spawn request"
+rm swarmforge/squad.conf
+for bad_profile in \
+  'custom custom-model high' \
+  'codex bad! high'; do
+  set +e
+  OUT="$("$SWARM" squad spawn sppbad implementer $bad_profile --no-agent 2>&1)"
+  STATUS=$?
+  set -e
+  [ "$STATUS" -eq 2 ] || fail "invalid pinned profile should exit 2, got $STATUS"
+  expect "invalid pinned profile token" "INVALID_AGENT_PROFILE" <<<"$OUT"
+done
+[ "$BEFORE_WORKER_RECORDS" -eq "$(find .swarmforge/squad/workers -type f -name '*.edn' | wc -l)" ] \
+  || fail "invalid pinned profile wrote a worker record"
+set +e
+OUT="$("$SCRIPTS/squad_spawn_request.sh" create sppbad implementer codex gpt-5.6-sol 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "partial request profile should be usage exit 1, got $STATUS"
+[ ! -e .swarmforge/squad/spawn-requests/sppbad.edn ] \
+  || fail "partial profile wrote a spawn request"
+ok "invalid and partial profiles fail before durable writes"
+rm -f bad-profile.md
+
 step "spawn-request: create/list/drop lifecycle"
 echo "Spawn me." > sr.md
 "$SCRIPTS/squad_assign.sh" create sr1 implementer sr.md > /dev/null
@@ -1699,6 +1942,43 @@ if grep -q ' d1conf squadd-spawn template=implementer kind=' .swarmforge/squad/e
   fail "squadd-spawn must not append kind= when the request carried none"
 fi
 ok "squadd-spawn without request kind keeps the original detail"
+
+step "squadd: full spawn-request profile reaches the durable worker"
+"$SCRIPTS/squad_assign.sh" create dprofile implementer instr.md > /dev/null
+"$SCRIPTS/squad_spawn_request.sh" create dprofile implementer \
+  codex gpt-5.6-sol xhigh > /dev/null
+PROFILE_REQUEST=.swarmforge/squad/spawn-requests/dprofile.edn
+grep -q ':kind "codex"' "$PROFILE_REQUEST" || fail "full request missing kind"
+grep -q ':model "gpt-5.6-sol"' "$PROFILE_REQUEST" || fail "full request missing model"
+grep -q ':effort "xhigh"' "$PROFILE_REQUEST" || fail "full request missing effort"
+grep -q ' dprofile spawn-requested template=implementer kind=codex model=gpt-5.6-sol effort=xhigh' \
+  .swarmforge/squad/events.log || fail "full request event detail is incomplete"
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+WPROFILE=squadproj-implementer-dprofile
+PROFILE_WORKER_RECORD=".swarmforge/squad/workers/$WPROFILE.edn"
+grep -q ':agent-kind "codex"' "$PROFILE_WORKER_RECORD" || fail "daemon profile kind missing"
+grep -q ':agent-model "gpt-5.6-sol"' "$PROFILE_WORKER_RECORD" || fail "daemon profile model missing"
+grep -q ':agent-effort "xhigh"' "$PROFILE_WORKER_RECORD" || fail "daemon profile effort missing"
+[ "$(roles_tsv_kind "$WPROFILE")" = codex ] || fail "daemon profile kind missing from roles"
+grep -q ' dprofile squadd-spawn template=implementer kind=codex model=gpt-5.6-sol effort=xhigh' \
+  .swarmforge/squad/events.log || fail "daemon profile event detail is incomplete"
+[ ! -e "$PROFILE_REQUEST" ] || fail "successful full profile request was not consumed"
+ok "daemon preserves and records a full assignment profile"
+
+step "squadd: crafted partial profile remains pending"
+"$SCRIPTS/squad_assign.sh" create dpartial implementer instr.md > /dev/null
+printf '{:assignment "dpartial", :template "implementer", :kind "codex", :model "gpt-5.6-sol", :requested-at "test"}\n' \
+  > .swarmforge/squad/spawn-requests/dpartial.edn
+BEFORE_PARTIAL_WORKERS="$(find .swarmforge/squad/workers -type f -name '*.edn' | wc -l)"
+bb "$SCRIPTS/squadd.bb" "$SQ" --once
+[ -e .swarmforge/squad/spawn-requests/dpartial.edn ] \
+  || fail "crafted partial request should remain for repair/retry"
+[ "$BEFORE_PARTIAL_WORKERS" -eq "$(find .swarmforge/squad/workers -type f -name '*.edn' | wc -l)" ] \
+  || fail "crafted partial request allocated a worker"
+grep -q 'spawn-failed dpartial' .swarmforge/squad/daemon/squadd.log \
+  || fail "crafted partial request failure was not logged"
+ok "crafted partial profile fails closed in the daemon path"
+"$SCRIPTS/squad_spawn_request.sh" drop dpartial > /dev/null
 rm swarmforge/squad.conf
 
 step "squadd: merge pass (accepted result lands on main)"

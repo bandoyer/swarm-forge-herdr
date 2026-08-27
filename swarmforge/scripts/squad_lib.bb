@@ -2,7 +2,7 @@
 ;;
 ;; Owns the durable .swarmforge/squad/ layout the squad entry scripts share:
 ;; EDN record files, the append-only events.log, squad.conf settings
-;; (capacity, worker kind, merger depth, approval gates), and the
+;; (capacity, agent profiles, merger depth, approval gates), and the
 ;; validated state-transition step. Loads handoff_lib.bb itself, so
 ;; entries load only this file. Defines no side effects at load time.
 
@@ -13,7 +13,15 @@
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
-(defn squad-dir [] (fs/path (handoff-lib/project-root) ".swarmforge" "squad"))
+(def ^:dynamic *project-root*
+  "Launcher bootstrap override. Entry scripts normally resolve through the
+  registered roles.tsv; `swarm squad up` binds its already-validated root
+  before that registration exists."
+  nil)
+
+(defn project-root [] (or *project-root* (handoff-lib/project-root)))
+
+(defn squad-dir [] (fs/path (project-root) ".swarmforge" "squad"))
 
 (defn log-event!
   "Append one line to events.log: '<iso-timestamp> <id> <event> [detail]'.
@@ -115,7 +123,7 @@
 (defn- squad-conf-lines
   "Lines of swarmforge/squad.conf; empty when the file is absent."
   []
-  (let [file (fs/path (handoff-lib/project-root) "swarmforge" "squad.conf")]
+  (let [file (fs/path (project-root) "swarmforge" "squad.conf")]
     (if (fs/exists? file)
       (str/split-lines (slurp (str file)))
       [])))
@@ -155,6 +163,166 @@
   [kind]
   (when (and kind (not (valid-agent-kind? kind)))
     (handoff-lib/die 2 (str "INVALID_KIND: " kind))))
+
+(def pinned-profile-kinds
+  "Agent kinds whose model/effort CLI mapping SwarmForge owns. Kind-only
+  profiles remain open to every safe Herdr kind for S6 compatibility."
+  #{"claude" "codex" "grok"})
+
+(defn valid-agent-model?
+  "Model ids are argv/audit values, never paths. Permit provider-style
+  separators while excluding whitespace and control characters."
+  [model]
+  (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._:/-]*" (str model))))
+
+(defn valid-agent-effort? [effort] (safe-token? effort))
+
+(defn- invalid-profile! [detail]
+  (handoff-lib/die 2 (str "INVALID_AGENT_PROFILE: " detail)))
+
+(defn require-valid-agent-profile!
+  "Validate and return a {:kind, optional :model/:effort} profile. A
+  kind-only profile preserves S6's INVALID_KIND error and open kind set; a
+  pinned profile is complete and limited to launch mappings owned here."
+  [{:keys [kind model effort] :as profile}]
+  (if (or model effort)
+    (do
+      (when-not (and model effort)
+        (invalid-profile! "model and effort must be supplied together"))
+      (when-not (valid-agent-kind? kind)
+        (invalid-profile! (str "unsafe kind: " kind)))
+      (when-not (pinned-profile-kinds kind)
+        (invalid-profile! (str "pinned kind is unsupported: " kind)))
+      (when-not (valid-agent-model? model)
+        (invalid-profile! (str "unsafe model: " model)))
+      (when-not (valid-agent-effort? effort)
+        (invalid-profile! (str "unsafe effort: " effort))))
+    (require-valid-agent-kind! kind))
+  profile)
+
+(defn explicit-agent-profile
+  "Parse zero, one, or three CLI values into no override, a legacy kind-only
+  profile, or a complete pinned profile. Callers normally gate arity for their
+  own usage text; this function still fails closed when called directly."
+  [values]
+  (let [values (vec values)
+        profile (case (count values)
+                  0 nil
+                  1 {:kind (nth values 0)}
+                  3 {:kind (nth values 0)
+                     :model (nth values 1)
+                     :effort (nth values 2)}
+                  (invalid-profile! "expected <kind> or <kind> <model> <effort>"))]
+    (when profile (require-valid-agent-profile! profile))))
+
+(defn agent-profile-fields
+  "Durable EDN fields for a resolved profile. Kind is always present; model
+  and effort are additive only for a pinned profile."
+  [{:keys [kind model effort]}]
+  (cond-> {:agent-kind kind}
+    model (assoc :agent-model model :agent-effort effort)))
+
+(defn agent-profile-detail
+  "Stable event/status detail. Kind-only text remains byte-compatible with
+  S6; pinned profiles append model and effort."
+  [{:keys [kind model effort]}]
+  (str "kind=" kind
+       (when model (str " model=" model " effort=" effort))))
+
+(defn agent-launch-args
+  "Provider-native CLI arguments passed after Herdr's `--`."
+  [{:keys [kind model effort] :as profile}]
+  (require-valid-agent-profile! profile)
+  (if-not model
+    []
+    (case kind
+      "codex" ["--model" model "-c" (str "model_reasoning_effort=" effort)]
+      "claude" ["--model" model "--effort" effort]
+      "grok" ["--model" model "--reasoning-effort" effort]
+      ;; require-valid-agent-profile! owns this invariant; retain an explicit
+      ;; fail-closed branch if the supported set and mapping ever drift.
+      (invalid-profile! (str "no launch mapping for pinned kind: " kind)))))
+
+(defn- conf-setting-values
+  "All token vectors following a named squad.conf setting. Blank/comment and
+  unrelated lines are ignored; recognized malformed lines remain visible to
+  strict profile readers."
+  [setting]
+  (vec
+   (for [line (squad-conf-lines)
+         :let [trimmed (str/trim line)]
+         :when (and (not (str/blank? trimmed))
+                    (not (str/starts-with? trimmed "#")))
+         :let [tokens (str/split trimmed #"\s+")]
+         :when (= setting (first tokens))]
+     (vec (rest tokens)))))
+
+(defn- one-profile-setting
+  [setting]
+  (let [matches (conf-setting-values setting)]
+    (when (> (count matches) 1)
+      (invalid-profile! (str "duplicate " setting)))
+    (when-let [values (first matches)]
+      (when-not (= 3 (count values))
+        (invalid-profile! (str setting " requires <kind> <model> <effort>")))
+      (explicit-agent-profile values))))
+
+(defn- configured-template-profile [template]
+  (let [rows (conf-setting-values "template_profile")]
+    ;; Validate every recognized row so a typo cannot remain latent until one
+    ;; particular template happens to spawn.
+    (doseq [values rows]
+      (when-not (= 4 (count values))
+        (invalid-profile! "template_profile requires <template> <kind> <model> <effort>"))
+      (when-not (safe-token? (first values))
+        (invalid-profile! (str "unsafe template: " (first values))))
+      (require-valid-agent-profile!
+       {:kind (nth values 1) :model (nth values 2) :effort (nth values 3)}))
+    (when-let [duplicate (->> rows
+                              (map first)
+                              frequencies
+                              (some (fn [[candidate n]]
+                                      (when (> n 1) candidate))))]
+      (invalid-profile! (str "duplicate template_profile for " duplicate)))
+    (let [matches (filter #(= template (first %)) rows)]
+      (when-let [values (first matches)]
+        {:kind (nth values 1) :model (nth values 2) :effort (nth values 3)}))))
+
+(defn validate-agent-profile-config!
+  "Strictly validate every recognized profile setting before any profile-
+  sensitive record is written. Legacy worker_kind keeps its historical
+  permissive fallback behavior."
+  []
+  (one-profile-setting "leader_profile")
+  (one-profile-setting "worker_profile")
+  ;; A nil lookup still validates every template row and every duplicate.
+  (configured-template-profile nil)
+  true)
+
+(defn configured-leader-profile
+  "Configured pinned leader profile, or the legacy kind-only Claude default."
+  []
+  (validate-agent-profile-config!)
+  (or (one-profile-setting "leader_profile") {:kind "claude"}))
+
+(declare configured-worker-kind)
+
+(defn configured-worker-profile
+  "Resolved configured profile for a template before any explicit assignment
+  override: template profile, default worker profile, legacy worker_kind, then
+  kind-only Claude."
+  [template]
+  (validate-agent-profile-config!)
+  (or (configured-template-profile template)
+      (one-profile-setting "worker_profile")
+      {:kind (configured-worker-kind)}))
+
+(defn resolve-worker-profile
+  "Resolve exactly once at allocation. An explicit kind-only profile replaces
+  the complete configured profile rather than borrowing incompatible pins."
+  [template explicit-profile]
+  (validate-agent-profile-config!)
+  (or explicit-profile (configured-worker-profile template)))
 
 (defn configured-worker-kind
   "Configured transient-worker kind; claude when squad.conf has no valid

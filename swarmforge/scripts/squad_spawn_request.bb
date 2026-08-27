@@ -4,7 +4,8 @@
 ;;
 ;; A spawn-request is the leader asking the daemon to spawn a worker for a
 ;; :created assignment: .swarmforge/squad/spawn-requests/<assignment-id>.edn
-;; holding {:assignment :template :requested-at} plus an optional :kind.
+;; holding {:assignment :template :requested-at}, an optional :kind, and
+;; optional paired :model/:effort profile pins.
 ;; This tool creates, lists, and drops requests; the daemon consumes a request
 ;; when it spawns. Requests for missing or non-:created assignments are
 ;; refused with exit 2, so a stale request can only arise from lifecycle
@@ -19,7 +20,7 @@
 
 (def usage-text
   (str "Usage: squad_spawn_request.sh <subcommand> ...\n\n"
-       "  create <assignment-id> <template> [kind]\n"
+       "  create <assignment-id> <template> [kind [model effort]]\n"
        "  list\n"
        "  drop <assignment-id>"))
 
@@ -34,9 +35,10 @@
 
 ;; --- subcommands ----------------------------------------------------------
 
-(defn create! [assignment-id template explicit-kind]
-  (squad-lib/require-valid-agent-kind! explicit-kind)
-  (let [file (request-file assignment-id)
+(defn create! [assignment-id template profile-values]
+  (squad-lib/validate-agent-profile-config!)
+  (let [explicit-profile (squad-lib/explicit-agent-profile profile-values)
+        file (request-file assignment-id)
         status-file (squad-lib/status-file assignment-id)]
     ;; Templates become audit-log detail and daemon spawn arguments —
     ;; gate their shape like assignment ids (reviewer finding,
@@ -59,15 +61,21 @@
                                    assignment-id (name state)))))
     (fs/create-dirs (squad-lib/spawn-requests-dir))
     ;; Preserve the original three-field shape unless the leader supplied an
-    ;; override; the file's presence or absence is the request lifecycle.
+    ;; override; kind-only requests retain S6's one-key additive shape.
     (spit (str file) (str (pr-str (cond-> {:assignment assignment-id
                                           :template template
                                           :requested-at (handoff-lib/iso-now)}
-                                   explicit-kind (assoc :kind explicit-kind)))
+                                   explicit-profile
+                                   (assoc :kind (:kind explicit-profile))
+
+                                   (:model explicit-profile)
+                                   (assoc :model (:model explicit-profile)
+                                          :effort (:effort explicit-profile))))
                           "\n"))
     (squad-lib/log-event! assignment-id "spawn-requested"
                           (str "template=" template
-                               (when explicit-kind (str " kind=" explicit-kind))))
+                               (when explicit-profile
+                                 (str " " (squad-lib/agent-profile-detail explicit-profile)))))
     (println (str "SPAWN_REQUEST_CREATED: " assignment-id))))
 
 (defn list! []
@@ -91,8 +99,8 @@
   (let [[command & params] args
         params (vec params)]
     (case command
-      "create" (if (<= 2 (count params) 3)
-                 (create! (nth params 0) (nth params 1) (nth params 2 nil))
+      "create" (if (#{2 3 5} (count params))
+                 (create! (nth params 0) (nth params 1) (drop 2 params))
                  (usage-die))
       "list" (if (= [] params) (list!) (usage-die))
       "drop" (if (= 1 (count params)) (drop! (first params)) (usage-die))
