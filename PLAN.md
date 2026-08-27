@@ -141,10 +141,7 @@ Designs, nothing built yet:
 - [ ] S6 worker agent kind is data (unblocks Grok/Codex squad workers)
 - [ ] S7a daemon-only env gate; S7b leader contract
 - [ ] S8 atomic records + stale sequence.lock recovery
-- [x] `six-grok-codex-review` vs `six-codex-grok-review` undo slice —
-      invert won (Sol spec/QA, Grok coder/hardener). Optional
-      `six-codex-grok-fable-review` spends leftover Fable 5 High on
-      architect only. Design: `docs/six-pack-grok-codex.md`.
+- [x] Consolidate the experimental pack matrix into `six-all` and `six-cg`.
 
 ## Decisions log
 

@@ -28,18 +28,11 @@ The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
 
 The bundled presets select their agent CLI explicitly:
 
-- The standard `two`, `four`, `six`, and `adversaries` presets use Claude.
-- Model-pinned Claude adversaries variants include full Opus 4.6 and Opus 5
-  presets at maximum effort.
-- Codex presets are provided for adversaries and isolated six-role runs.
-- Grok presets are provided for adversaries and six-role runs, with optional
-  isolation behind a human integration boundary.
-- One experimental six-role preset uses Grok for the coder and Codex for the
-  other roles.
-- `six-all-models-review` assigns benchmark-selected roles across Claude,
-  Codex, and Grok, with every worker isolated behind human integration.
-- `six-claude-codex-review` uses the benchmark-selected Claude and Codex
-  assignments when a two-provider six-pack is preferred.
+- The standard `two`, `four`, `six`, and `adversaries` presets use Codex.
+- `six-all` uses Fable for specification and architecture, Codex for coding
+  and QA, and Grok for cleaning and hardening.
+- `six-cg` is the Claude-free alternative: Codex specifies, codes, and QAs;
+  Grok cleans, architects, and hardens.
 - Any pack's `swarmforge.conf` can be edited after initialization to use an
   agent kind supported by Herdr.
 - Squad leaders accept an optional agent kind, but transient squad workers
@@ -96,6 +89,8 @@ cd /path/to/your-project
 git switch -c review/first-slice
 
 swarm init two
+# Or use the isolated mixed-provider default:
+swarm init
 ```
 
 Initialization writes a project-local `swarmforge/` configuration. Before
@@ -171,77 +166,24 @@ contract.
 
 | Preset | Entry role | Pipeline | Provider/layout |
 |---|---|---|---|
-| `two` | `coder` | coder → cleaner → coder | Claude; coder uses project root |
-| `adversaries` | `coder` | coder ↔ hostile reviewer until clean | Claude; coder uses project root |
-| `adversaries-sonnet`, `adversaries-sonnet-opus`, `adversaries-opus`, `adversaries-opus-fable` | `coder` | Same adversarial loop with pinned Claude models | Coder uses project root |
-| `adversaries-opus46`, `adversaries-opus5` | `coder` | Same adversarial loop with full Claude model IDs at max effort | Coder uses project root |
-| `adversaries-codex` | `coder` | Codex coder ↔ Codex reviewer | Coder uses project root; sandbox bypassed |
-| `adversaries-codex-review` | `coder` | Codex coder ↔ Codex reviewer | Both isolated; terminal candidate requires human integration |
-| `adversaries-grok` | `coder` | Grok coder ↔ Grok reviewer | Coder uses project root; permission checks bypassed |
-| `adversaries-grok-review` | `coder` | Grok coder ↔ Grok reviewer | Both isolated; terminal candidate requires human integration |
-| `four` | `specifier` | specifier → coder → refactorer → architect | Claude; specifier uses root, later roles are isolated |
-| `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Claude; specifier uses root, later roles are isolated |
-| `six-grok` | `specifier` | Six-role evidence pipeline | Grok; specifier uses root, later roles are isolated |
-| `six-grok-review` | `specifier` | Isolated six-role evidence pipeline | Grok; terminal result requires human integration |
-| `six-codex-review` | `specifier` | Isolated six-role evidence pipeline | Experimental; Codex; terminal result requires human integration |
-| `six-grok-codex-review` | `specifier` | Isolated six-role evidence pipeline | Grok judges/hardens, Sol codes/QAs; human integration |
-| `six-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Recommended Grok+Codex: Sol judges/QAs, Grok codes/hardens; human integration |
-| `six-codex-grok-fable-review` | `specifier` | Isolated six-role evidence pipeline | Same, with Fable 5 High as architect; human integration |
-| `six-mix-fable-review` | `specifier` | Isolated six-role evidence pipeline | Mix: Fable spec/architect, Sol code/QA, Grok clean/harden; human integration |
-| `six-mix-codex-grok-review` | `specifier` | Isolated six-role evidence pipeline | Fable-free mix: Sol spec/code/QA, Grok clean/architect/harden; human integration |
-| `six-all-models-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-selected Opus, Sol, and Grok roles; human integration |
-| `six-claude-codex-review` | `specifier` | Isolated six-role evidence pipeline | Benchmark-informed Opus and Sol roles; human integration |
+| `two` | `coder` | coder → cleaner → coder | Codex; coder uses project root |
+| `adversaries` | `coder` | coder ↔ hostile reviewer until clean | Codex; coder uses project root |
+| `four` | `specifier` | specifier → coder → refactorer → architect | Codex; specifier uses root, later roles are isolated |
+| `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Codex; specifier uses root, later roles are isolated |
+| `six-all` | `specifier` | Isolated six-role evidence pipeline | Fable + Codex + Grok; human integration |
+| `six-cg` | `specifier` | Isolated six-role evidence pipeline | Codex + Grok; human integration |
 
-For `two`, ordinary adversaries presets, and any other configuration whose
+For `two`, `adversaries`, and any other configuration whose
 coder worktree is `master` or `none`, work on a `review/...` branch. The
-`adversaries-codex-review` preset keeps both agents out of the project root and
-is the simplest preset when a human must approve the candidate before it
-touches the protected branch.
-
-Use the mixed-provider evidence pipeline with:
+two review-gated six-packs keep every role out of the project root.
 
 ```sh
-swarm init six-all-models-review    # new swarm project
-swarm switch six-all-models-review  # existing swarm project
+swarm init six-all    # Fable + Codex + Grok
+swarm init six-cg     # Codex + Grok
 ```
 
-It assigns Opus 5 xHigh to specification and architecture, Sol High to coding,
-Opus 5 High to cleaning, Grok 4.6 High to hardening, and Sol xHigh to QA. Every
-role is isolated, and the terminal candidate still requires human integration.
-
-Use the Claude-and-Codex evidence pipeline with:
-
-```sh
-swarm init six-claude-codex-review    # new swarm project
-swarm switch six-claude-codex-review  # existing swarm project
-```
-
-It assigns Opus 5 xHigh to specification, architecture, and hardening; Sol
-High to coding; Opus 5 High to cleaning; and Sol xHigh to QA. Hardener and QA
-must execute every project-declared output or security probe. Every role is
-isolated, and the terminal candidate still requires human integration.
-
-Use the Grok-and-Codex evidence pipeline with:
-
-```sh
-swarm init six-grok-codex-review    # new swarm project
-swarm switch six-grok-codex-review  # existing swarm project
-```
-
-It assigns Grok 4.6 xHigh to specification and architecture, Sol High to
-coding, Grok 4.6 High to cleaning and hardening, and Sol xHigh to QA.
-
-The recommended Grok+Codex six-pack after the undo comparison is the
-other way around:
-
-```sh
-swarm init six-codex-grok-review    # new swarm project
-swarm switch six-codex-grok-review  # existing swarm project
-```
-
-Sol xHigh specifies, architects, and QAs; Sol High cleans; Grok 4.6 High
-codes and hardens. Spend leftover Fable 5 on architect only with
-`six-codex-grok-fable-review`. See [Grok + Codex six-pack](docs/six-pack-grok-codex.md).
+Both are terminal review pipelines: QA produces a candidate for explicit human
+approval rather than integrating it into the protected branch.
 
 See [Choosing a mode](docs/choosing-a-mode.md) for the evidence and cost
 tradeoffs: two-pack work ends up *tidy*, adversaries work *attacked*, four-pack
@@ -356,8 +298,7 @@ starts.
 ### `Refusing to start coder ... on protected branch`
 
 The selected preset puts its coder in the project root. Switch to a dedicated
-review branch, or use a preset such as `adversaries-codex-review` whose coder
-has a linked worktree.
+review branch, or use `six-all` or `six-cg`, which isolate every role.
 
 ### An agent is blocked immediately after startup
 

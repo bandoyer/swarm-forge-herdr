@@ -2,7 +2,8 @@
 ;; swarm — launch a SwarmForge-style role swarm on the herdr runtime.
 ;;
 ;; Usage (run from your project's root, inside a running `herdr` session):
-;;   swarm init <pack>      copy a pack preset + prompts into the project
+;;   swarm init [pack]      copy a pack preset + prompts into the project
+;;                          (default pack: six-all)
 ;;   swarm switch <pack>    change packs: replace conf + pack article, add
 ;;                          missing role prompts; project/toolset kept
 ;;   swarm toolset <name>   install a quality-toolset article
@@ -150,7 +151,7 @@
     (when (protected-branches branch)
       (die (str "Refusing to start coder in the project root on protected branch '"
                 branch "'.")
-           "Use an isolated coder worktree, such as the adversaries-codex-review pack,"
+           "Use an isolated coder worktree, such as the six-all or six-cg pack,"
            "or switch the project root to a review/<task> branch first."))))
 
 (defn sync-scripts! [rows]
@@ -376,8 +377,11 @@
         (when (fs/exists? contract)
           (install! contract (fs/path target "contracts" (str role ".contract.edn"))))))))
 
+(def default-pack "six-all")
+
 (defn init! [pack]
-  (let [source (fs/path tool-root "packs" (str pack ".conf"))
+  (let [pack (or pack (do (println (str "No pack given; defaulting to " default-pack)) default-pack))
+        source (fs/path tool-root "packs" (str pack ".conf"))
         prompts (fs/path tool-root "prompts")
         target (fs/path project-root "swarmforge")]
     (when-not (and pack (fs/exists? source))

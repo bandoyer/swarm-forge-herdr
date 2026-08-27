@@ -36,17 +36,9 @@ reviewer has caught durability bugs, log injection, and argv injection.
 Cost: 2 agents; loops until clean, so hard tasks cost more — that's the
 feature.
 
-For a Claude-free six-pack, `six-grok-codex-review` is the proposed mix
-(Grok on spec/clean/architecture/hardening, Sol on code and QA). Pair it
-with `six-codex-grok-review` (the invert: Sol specs, Grok codes) on the
-same slice before treating either as settled — see
-[Grok + Codex six-pack](six-pack-grok-codex.md).
-
-Use `adversaries-codex-review` or `adversaries-grok-review` when a human must
-inspect the terminal candidate before integration. Both roles stay in linked
-worktrees, and the project root remains untouched until the operator integrates
-an explicitly approved result. This adds an integration gate, not another
-agent or another review pass.
+Use `six-all` for the review-gated Fable, Codex, and Grok pipeline. Use
+`six-cg` when the same isolated human-integration boundary is wanted without
+Claude.
 
 ### four-pack — specifier → coder → refactorer → architect
 *The spec-driven loop.* Requirements are pinned before code exists;

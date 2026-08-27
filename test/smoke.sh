@@ -100,6 +100,16 @@ done
 [ "$PACK_OK" -eq 1 ] || fail "installed pack.prompt matches no packs/*.prompt"
 ok "installed pack.prompt matches a pack article"
 
+step "standard packs default every role to Codex"
+for pack in two four six adversaries; do
+  conf="$TOOL_ROOT/packs/$pack.conf"
+  grep -qE '^window [^ ]+ (claude|grok) ' "$conf" \
+    && fail "$pack should contain only Codex roles"
+  [ "$(grep -c '^window ' "$conf")" -eq "$(grep -c '^window .* codex .* --dangerously-bypass-approvals-and-sandbox$' "$conf")" ] \
+    || fail "$pack Codex roles should run unattended"
+done
+ok "two, four, six, and adversaries use inherited-model Codex workers"
+
 # A new kind of installed file must be classified, not silently ignored:
 # either it is compared above or it is a documented per-project file.
 while read -r rel; do
@@ -245,250 +255,60 @@ grep -qxF '{:artifact-roots ["docs/"]}' \
 ok "squad up leaves an existing leader contract in place"
 (cd "$S7_UP" && PATH="$S7_UP_BIN:$PATH" "$TOOL_ROOT/bin/swarm" down >/dev/null)
 
-step "review-gated Codex pack isolates both roles"
-REVIEW_PACK="$WORK/review-pack"
-mkdir -p "$REVIEW_PACK"
-git -C "$REVIEW_PACK" init -qb main
-git -C "$REVIEW_PACK" -c user.email=smoke@test -c user.name=smoke \
+step "six-all pins the Fable, Codex, and Grok roles"
+SIX_ALL_PROJECT="$WORK/six-all-pack"
+mkdir -p "$SIX_ALL_PROJECT"
+git -C "$SIX_ALL_PROJECT" init -qb main
+git -C "$SIX_ALL_PROJECT" -c user.email=smoke@test -c user.name=smoke \
   commit -q --allow-empty -m "initial"
-(cd "$REVIEW_PACK" && "$TOOL_ROOT/bin/swarm" init adversaries-codex-review >/dev/null)
-grep -q '^window coder codex candidate task ' \
-  "$REVIEW_PACK/swarmforge/swarmforge.conf" \
-  || fail "review-gated coder should use the candidate worktree"
-grep -q '^window reviewer codex reviewer task ' \
-  "$REVIEW_PACK/swarmforge/swarmforge.conf" \
-  || fail "review-gated reviewer should use the reviewer worktree"
-ok "review-gated pack keeps coder and reviewer out of the project root"
+(cd "$SIX_ALL_PROJECT" && "$TOOL_ROOT/bin/swarm" init six-all >/dev/null)
+SIX_ALL_CONF="$SIX_ALL_PROJECT/swarmforge/swarmforge.conf"
+grep -q '^window specifier claude all-specifier task --model claude-fable-5 --effort high$' "$SIX_ALL_CONF" \
+  || fail "six-all specifier should pin Fable 5 High"
+grep -q '^window coder codex all-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' "$SIX_ALL_CONF" \
+  || fail "six-all coder should pin Sol High"
+grep -q '^window cleaner grok all-cleaner batch --model grok-4.6 --reasoning-effort high ' "$SIX_ALL_CONF" \
+  || fail "six-all cleaner should pin Grok 4.6 High"
+grep -q '^window architect claude all-architect batch --model claude-fable-5 --effort high$' "$SIX_ALL_CONF" \
+  || fail "six-all architect should pin Fable 5 High"
+grep -q '^window hardener grok all-hardener batch --model grok-4.6 --reasoning-effort high ' "$SIX_ALL_CONF" \
+  || fail "six-all hardener should pin Grok 4.6 High"
+grep -q '^window qa codex all-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' "$SIX_ALL_CONF" \
+  || fail "six-all QA should pin Sol xHigh"
+grep -qE '^window .* (claude|codex|grok) (master|none) ' "$SIX_ALL_CONF" \
+  && fail "six-all should isolate every role"
+ok "six-all pins three providers behind human integration"
 
-step "all-models six-pack pins benchmark-selected roles"
-ALL_MODELS_PACK="$WORK/all-models-pack"
-mkdir -p "$ALL_MODELS_PACK"
-git -C "$ALL_MODELS_PACK" init -qb main
-git -C "$ALL_MODELS_PACK" -c user.email=smoke@test -c user.name=smoke \
+step "six-cg pins the Codex and Grok roles"
+SIX_CG_PROJECT="$WORK/six-cg-pack"
+mkdir -p "$SIX_CG_PROJECT"
+git -C "$SIX_CG_PROJECT" init -qb main
+git -C "$SIX_CG_PROJECT" -c user.email=smoke@test -c user.name=smoke \
   commit -q --allow-empty -m "initial"
-(cd "$ALL_MODELS_PACK" && \
-  "$TOOL_ROOT/bin/swarm" init six-all-models-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-codex-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-all-models-review >/dev/null)
-ALL_MODELS_CONF="$ALL_MODELS_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier claude all-specifier task --model claude-opus-5 --effort xhigh$' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models specifier should pin Opus 5 xHigh"
-grep -q '^window coder codex all-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models coder should pin Sol High"
-grep -q '^window cleaner claude all-cleaner batch --model claude-opus-5 --effort high$' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models cleaner should pin Opus 5 High"
-grep -q '^window architect claude all-architect batch --model claude-opus-5 --effort xhigh$' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models architect should pin Opus 5 xHigh"
-grep -q '^window hardener grok all-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models hardener should pin Grok 4.6 High"
-grep -q '^window qa codex all-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$ALL_MODELS_CONF" \
-  || fail "all-models qa should pin Sol xHigh"
-grep -q 'Only the operator' \
-  "$ALL_MODELS_PACK/swarmforge/constitution/articles/pack.prompt" \
-  || fail "all-models pack should retain the human integration gate"
-ok "all-models six-pack is invokable with pinned isolated roles"
+(cd "$SIX_CG_PROJECT" && "$TOOL_ROOT/bin/swarm" init six-cg >/dev/null)
+SIX_CG_CONF="$SIX_CG_PROJECT/swarmforge/swarmforge.conf"
+grep -q '^window specifier codex cg-specifier task --model gpt-5.6-sol -c model_reasoning_effort=max ' "$SIX_CG_CONF" \
+  || fail "six-cg specifier should pin Sol Max"
+grep -q '^window coder codex cg-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' "$SIX_CG_CONF" \
+  || fail "six-cg coder should pin Sol High"
+grep -q '^window cleaner grok cg-cleaner batch --model grok-4.6 --reasoning-effort high ' "$SIX_CG_CONF" \
+  || fail "six-cg cleaner should pin Grok 4.6 High"
+grep -q '^window architect grok cg-architect batch --model grok-4.6 --reasoning-effort xhigh ' "$SIX_CG_CONF" \
+  || fail "six-cg architect should pin Grok 4.6 xHigh"
+grep -q '^window hardener grok cg-hardener batch --model grok-4.6 --reasoning-effort high ' "$SIX_CG_CONF" \
+  || fail "six-cg hardener should pin Grok 4.6 High"
+grep -q '^window qa codex cg-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' "$SIX_CG_CONF" \
+  || fail "six-cg QA should pin Sol xHigh"
+grep -qE '^window .* (codex|grok) (master|none) ' "$SIX_CG_CONF" \
+  && fail "six-cg should isolate every role"
+ok "six-cg pins two providers behind human integration"
 
-step "Claude and Codex six-pack pins benchmark-informed roles"
-CLAUDE_CODEX_PACK="$WORK/claude-codex-pack"
-mkdir -p "$CLAUDE_CODEX_PACK"
-git -C "$CLAUDE_CODEX_PACK" init -qb main
-git -C "$CLAUDE_CODEX_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$CLAUDE_CODEX_PACK" && \
-  "$TOOL_ROOT/bin/swarm" init six-claude-codex-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-codex-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-claude-codex-review >/dev/null)
-CLAUDE_CODEX_CONF="$CLAUDE_CODEX_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier claude cc-specifier task --model claude-opus-5 --effort xhigh$' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex specifier should pin Opus 5 xHigh"
-grep -q '^window coder codex cc-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex coder should pin Sol High"
-grep -q '^window cleaner claude cc-cleaner batch --model claude-opus-5 --effort high$' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex cleaner should pin Opus 5 High"
-grep -q '^window architect claude cc-architect batch --model claude-opus-5 --effort xhigh$' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex architect should pin Opus 5 xHigh"
-grep -q '^window hardener claude cc-hardener batch --model claude-opus-5 --effort xhigh$' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex hardener should pin Opus 5 xHigh"
-grep -q '^window qa codex cc-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$CLAUDE_CODEX_CONF" \
-  || fail "Claude-Codex QA should pin Sol xHigh"
-CLAUDE_CODEX_PROMPT="$CLAUDE_CODEX_PACK/swarmforge/constitution/articles/pack.prompt"
-grep -q 'output or security probe' "$CLAUDE_CODEX_PROMPT" \
-  || fail "Claude-Codex pack should require executable output and security probes"
-grep -q 'Only the operator' "$CLAUDE_CODEX_PROMPT" \
-  || fail "Claude-Codex pack should retain the human integration gate"
-ok "Claude and Codex six-pack is invokable with pinned isolated roles"
-
-step "Grok and Codex six-pack pins flagship roles"
-GROK_CODEX_PACK="$WORK/grok-codex-pack"
-mkdir -p "$GROK_CODEX_PACK"
-git -C "$GROK_CODEX_PACK" init -qb main
-git -C "$GROK_CODEX_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$GROK_CODEX_PACK" && \
-  "$TOOL_ROOT/bin/swarm" init six-grok-codex-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-codex-grok-review >/dev/null && \
-  "$TOOL_ROOT/bin/swarm" switch six-grok-codex-review >/dev/null)
-GROK_CODEX_CONF="$GROK_CODEX_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier grok gc-specifier task --model grok-4.6 --reasoning-effort xhigh ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex specifier should pin Grok 4.6 xHigh"
-grep -q '^window coder codex gc-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex coder should pin Sol High"
-grep -q '^window cleaner grok gc-cleaner batch --model grok-4.6 --reasoning-effort high ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex cleaner should pin Grok 4.6 High"
-grep -q '^window architect grok gc-architect batch --model grok-4.6 --reasoning-effort xhigh ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex architect should pin Grok 4.6 xHigh"
-grep -q '^window hardener grok gc-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex hardener should pin Grok 4.6 High"
-grep -q '^window qa codex gc-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$GROK_CODEX_CONF" \
-  || fail "Grok-Codex QA should pin Sol xHigh"
-GROK_CODEX_PROMPT="$GROK_CODEX_PACK/swarmforge/constitution/articles/pack.prompt"
-grep -q 'output or security probe' "$GROK_CODEX_PROMPT" \
-  || fail "Grok-Codex pack should require executable output and security probes"
-grep -q 'Only explicit human' "$GROK_CODEX_PROMPT" \
-  || fail "Grok-Codex pack should retain the human integration gate"
-grep -qE '^window .* (grok|codex) (master|none) ' "$GROK_CODEX_CONF" \
-  && fail "Grok-Codex pack should keep every role out of the project root"
-ok "Grok and Codex six-pack is invokable with pinned isolated roles"
-
-step "Codex and Grok invert pins who specs vs who codes"
-INVERT_PACK="$WORK/codex-grok-invert"
-mkdir -p "$INVERT_PACK"
-git -C "$INVERT_PACK" init -qb main
-git -C "$INVERT_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$INVERT_PACK" && "$TOOL_ROOT/bin/swarm" init six-codex-grok-review >/dev/null)
-INVERT_CONF="$INVERT_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier codex exp-a-specifier task --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$INVERT_CONF" \
-  || fail "invert specifier should pin Sol xHigh"
-grep -q '^window coder grok exp-a-coder task --model grok-4.6 --reasoning-effort high ' \
-  "$INVERT_CONF" \
-  || fail "invert coder should pin Grok 4.6 High"
-grep -q '^window cleaner codex exp-a-cleaner batch --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$INVERT_CONF" \
-  || fail "invert cleaner should pin Sol High"
-grep -q '^window architect codex exp-a-architect batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$INVERT_CONF" \
-  || fail "invert architect should pin Sol xHigh"
-grep -q '^window hardener grok exp-a-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$INVERT_CONF" \
-  || fail "invert hardener should stay Grok 4.6 High"
-grep -q '^window qa codex exp-a-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$INVERT_CONF" \
-  || fail "invert QA should stay Sol xHigh"
-grep -qE '^window .* (grok|codex) (master|none) ' "$INVERT_CONF" \
-  && fail "invert pack should keep every role out of the project root"
-ok "Codex and Grok invert isolates spec vs code without moving hardener or QA"
-
-step "Codex Grok Fable six-pack pins Fable 5 High as architect"
-FABLE_PACK="$WORK/codex-grok-fable"
-mkdir -p "$FABLE_PACK"
-git -C "$FABLE_PACK" init -qb main
-git -C "$FABLE_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$FABLE_PACK" && "$TOOL_ROOT/bin/swarm" init six-codex-grok-fable-review >/dev/null)
-FABLE_CONF="$FABLE_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier codex cgf-specifier task --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$FABLE_CONF" \
-  || fail "Fable pack specifier should pin Sol xHigh"
-grep -q '^window coder grok cgf-coder task --model grok-4.6 --reasoning-effort high ' \
-  "$FABLE_CONF" \
-  || fail "Fable pack coder should pin Grok 4.6 High"
-grep -q '^window cleaner codex cgf-cleaner batch --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$FABLE_CONF" \
-  || fail "Fable pack cleaner should pin Sol High"
-grep -q '^window architect claude cgf-architect batch --model claude-fable-5 --effort high$' \
-  "$FABLE_CONF" \
-  || fail "Fable pack architect should pin Fable 5 High"
-grep -q '^window hardener grok cgf-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$FABLE_CONF" \
-  || fail "Fable pack hardener should pin Grok 4.6 High"
-grep -q '^window qa codex cgf-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$FABLE_CONF" \
-  || fail "Fable pack QA should pin Sol xHigh"
-grep -qE '^window .* (grok|codex|claude) (master|none) ' "$FABLE_CONF" \
-  && fail "Fable pack should keep every role out of the project root"
-ok "Codex Grok Fable six-pack spends Claude only on architect"
-
-step "mixed Grok Sol Fable six-pack pins three providers"
-MIX_PACK="$WORK/mix-fable-pack"
-mkdir -p "$MIX_PACK"
-git -C "$MIX_PACK" init -qb main
-git -C "$MIX_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$MIX_PACK" && "$TOOL_ROOT/bin/swarm" init six-mix-fable-review >/dev/null)
-MIX_CONF="$MIX_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier claude mix-specifier task --model claude-fable-5 --effort high$' \
-  "$MIX_CONF" \
-  || fail "mix specifier should pin Fable 5 High"
-grep -q '^window coder codex mix-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$MIX_CONF" \
-  || fail "mix coder should pin Sol High"
-grep -q '^window cleaner grok mix-cleaner batch --model grok-4.6 --reasoning-effort high ' \
-  "$MIX_CONF" \
-  || fail "mix cleaner should pin Grok 4.6 High"
-grep -q '^window architect claude mix-architect batch --model claude-fable-5 --effort high$' \
-  "$MIX_CONF" \
-  || fail "mix architect should pin Fable 5 High"
-grep -q '^window hardener grok mix-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$MIX_CONF" \
-  || fail "mix hardener should pin Grok 4.6 High"
-grep -q '^window qa codex mix-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$MIX_CONF" \
-  || fail "mix QA should pin Sol xHigh"
-grep -qE '^window .* (grok|codex|claude) (master|none) ' "$MIX_CONF" \
-  && fail "mix pack should keep every role out of the project root"
-ok "mixed Grok Sol Fable six-pack pins all three providers"
-
-step "mixed Codex Grok six-pack pins the Fable-free replacement"
-MIX_CODEX_GROK_PACK="$WORK/mix-codex-grok-pack"
-mkdir -p "$MIX_CODEX_GROK_PACK"
-git -C "$MIX_CODEX_GROK_PACK" init -qb main
-git -C "$MIX_CODEX_GROK_PACK" -c user.email=smoke@test -c user.name=smoke \
-  commit -q --allow-empty -m "initial"
-(cd "$MIX_CODEX_GROK_PACK" && "$TOOL_ROOT/bin/swarm" init six-mix-codex-grok-review >/dev/null)
-MIX_CODEX_GROK_CONF="$MIX_CODEX_GROK_PACK/swarmforge/swarmforge.conf"
-grep -q '^window specifier codex mcg-specifier task --model gpt-5.6-sol -c model_reasoning_effort=max ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix specifier should pin Sol Max"
-grep -q '^window coder codex mcg-coder task --model gpt-5.6-sol -c model_reasoning_effort=high ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix coder should pin Sol High"
-grep -q '^window cleaner grok mcg-cleaner batch --model grok-4.6 --reasoning-effort high ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix cleaner should pin Grok 4.6 High"
-grep -q '^window architect grok mcg-architect batch --model grok-4.6 --reasoning-effort xhigh ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix architect should pin Grok 4.6 xHigh"
-grep -q '^window hardener grok mcg-hardener batch --model grok-4.6 --reasoning-effort high ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix hardener should pin Grok 4.6 High"
-grep -q '^window qa codex mcg-qa batch --model gpt-5.6-sol -c model_reasoning_effort=xhigh ' \
-  "$MIX_CODEX_GROK_CONF" \
-  || fail "Codex Grok mix QA should pin Sol xHigh"
-grep -qE '^window .* (grok|codex) (master|none) ' "$MIX_CODEX_GROK_CONF" \
-  && fail "Codex Grok mix should keep every role out of the project root"
-ok "mixed Codex Grok six-pack pins the agreed roles"
-
-step "every provider-specific pack initializes from a complete pair"
+step "pack catalog is intentionally small and complete"
+EXPECTED_PACKS="$(printf '%s\n' adversaries four six six-all six-cg two | sort)"
+ACTUAL_PACKS="$(find "$TOOL_ROOT/packs" -maxdepth 1 -type f -name '*.conf' \
+  -printf '%f\n' | sed 's/\.conf$//' | sort)"
+[ "$ACTUAL_PACKS" = "$EXPECTED_PACKS" ] \
+  || fail "pack catalog should contain only the six supported presets"
 for conf in "$TOOL_ROOT"/packs/*.conf; do
   pack="$(basename "$conf" .conf)"
   pack_project="$WORK/pack-$pack"
@@ -502,37 +322,15 @@ for conf in "$TOOL_ROOT"/packs/*.conf; do
     "$pack_project/swarmforge/constitution/articles/pack.prompt" >/dev/null \
     || fail "$pack article changed during init"
 done
-ok "every pack has a matching article and survives initialization"
+ok "exactly six packs have matching articles and survive initialization"
 
-for spec in \
-  'adversaries-opus46.conf|claude-opus-4-6' \
-  'adversaries-opus5.conf|claude-opus-5'; do
-  file="${spec%%|*}"
-  model="${spec#*|}"
-  [ "$(grep -c "^window .* claude .* --model $model --effort max$" \
-      "$TOOL_ROOT/packs/$file")" -eq 2 ] \
-    || fail "$file should pin both roles to $model at max effort"
-done
-ok "Claude adversaries variants pin full Opus model IDs and effort"
-
-for file in \
-  adversaries-grok.conf adversaries-grok-review.conf \
-  six-grok.conf six-grok-review.conf; do
-  windows="$(grep -c '^window ' "$TOOL_ROOT/packs/$file")"
-  pinned="$(grep -c '^window .* grok .* --model grok-4.6 --reasoning-effort high --permission-mode bypassPermissions --no-subagents --disable-web-search$' \
-    "$TOOL_ROOT/packs/$file")"
-  [ "$windows" -eq "$pinned" ] \
-    || fail "$file should pin every role to the unattended Grok profile"
-done
-ok "Grok pack variants pin model, effort, permissions, and tool boundaries"
-
-for pack in adversaries-grok-review six-grok-review; do
-  grep -q 'Only the operator' "$TOOL_ROOT/packs/$pack.prompt" \
-    || fail "$pack should retain its human integration gate"
-  grep -qE '^window .* grok (master|none) ' "$TOOL_ROOT/packs/$pack.conf" \
-    && fail "$pack should keep every role out of the project root"
-done
-ok "review-gated Grok variants isolate every role behind human integration"
+DEFAULT_PACK_PROJECT="$WORK/default-pack"
+mkdir -p "$DEFAULT_PACK_PROJECT"
+(cd "$DEFAULT_PACK_PROJECT" && "$TOOL_ROOT/bin/swarm" init >/dev/null)
+diff -q "$TOOL_ROOT/packs/six-all.conf" \
+  "$DEFAULT_PACK_PROJECT/swarmforge/swarmforge.conf" >/dev/null \
+  || fail "bare swarm init should select six-all"
+ok "bare swarm init defaults to six-all"
 
 step "Rust toolset writes a complete quality article"
 RUST_TOOLSET_PROJECT="$WORK/rust-toolset"
