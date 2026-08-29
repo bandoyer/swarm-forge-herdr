@@ -1,6 +1,6 @@
 # swarm-forge-herdr
 
-A [Herdr](https://github.com/ogulcancelik/herdr)-native port and extension
+A [Herdr](https://github.com/thinkerisme/herdr)-native port and extension
 of the [swarm-forge](https://github.com/unclebob/swarm-forge) methodology:
 role-based AI agent swarms, one Git worktree per production role, with work
 moving between agents only through validated commit handoffs.
@@ -17,7 +17,7 @@ Two operating modes are available:
 | **Squad** | One persistent leader with transient, assignment-bound workers | Work that needs decomposition, parallelism, or ongoing judgment |
 
 The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
-250+ check headless smoke suite and has also been validated with live agents.
+375-check headless smoke suite and has also been validated with live agents.
 
 ## Requirements
 
@@ -29,14 +29,15 @@ The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
 The bundled presets select their agent CLI explicitly:
 
 - The standard `two`, `four`, `six`, and `adversaries` presets use Codex.
-- `six-all` uses Fable for specification and architecture, Codex for coding
-  and QA, and Grok for cleaning and hardening.
-- `six-cg` is the Claude-free alternative: Codex specifies, codes, and QAs;
+- The default `six-cg` preset uses Codex for specification, coding, and QA;
   Grok cleans, architects, and hardens.
+- `six-all` adds Fable for specification and architecture while retaining
+  Codex for coding and QA and Grok for cleaning and hardening.
 - Any pack's `swarmforge.conf` can be edited after initialization to use an
   agent kind supported by Herdr.
-- Squad leaders accept an optional agent kind, but transient squad workers
-  currently launch as Claude. A full squad run therefore requires Claude.
+- Squad leaders and transient workers are independently configurable with
+  kind-only or pinned model-and-effort profiles. Both fall back to kind-only
+  Claude when no explicit or project policy selects another provider.
 
 Some Codex and Grok presets deliberately disable their normal approval or
 sandbox boundaries so unattended workers do not stall. Read the selected
@@ -80,7 +81,7 @@ overwrite them.
 Run the launcher from the root of the project the agents will change, not
 from this tool's checkout.
 
-The default two-pack places its coder in the project root. As a safety rule,
+The stock two-pack places its coder in the project root. As a safety rule,
 the launcher refuses to start a project-root coder while that checkout is on
 `main` or `master`. Create a review branch first:
 
@@ -89,8 +90,8 @@ cd /path/to/your-project
 git switch -c review/first-slice
 
 swarm init two
-# Or use the isolated mixed-provider default:
-swarm init
+# Or use the default isolated Codex + Grok six-pack:
+swarm init            # equivalent to: swarm init six-cg
 ```
 
 Initialization writes a project-local `swarmforge/` configuration. Before
@@ -170,16 +171,16 @@ contract.
 | `adversaries` | `coder` | coder ↔ hostile reviewer until clean | Codex; coder uses project root |
 | `four` | `specifier` | specifier → coder → refactorer → architect | Codex; specifier uses root, later roles are isolated |
 | `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Codex; specifier uses root, later roles are isolated |
+| `six-cg` (default) | `specifier` | Isolated six-role evidence pipeline | Codex + Grok; human integration |
 | `six-all` | `specifier` | Isolated six-role evidence pipeline | Fable + Codex + Grok; human integration |
-| `six-cg` | `specifier` | Isolated six-role evidence pipeline | Codex + Grok; human integration |
 
 For `two`, `adversaries`, and any other configuration whose
 coder worktree is `master` or `none`, work on a `review/...` branch. The
 two review-gated six-packs keep every role out of the project root.
 
 ```sh
+swarm init            # six-cg: Codex + Grok
 swarm init six-all    # Fable + Codex + Grok
-swarm init six-cg     # Codex + Grok
 ```
 
 Both are terminal review pipelines: QA produces a candidate for explicit human
@@ -301,7 +302,7 @@ starts.
 
 | Command | Purpose |
 |---|---|
-| `swarm init <pack>` | Install one pack's config, constitution, prompts, and contracts |
+| `swarm init [pack]` | Install a pack's config, constitution, prompts, and contracts; defaults to `six-cg` |
 | `swarm switch <pack>` | Replace the pack config/article while retaining project customization |
 | `swarm toolset <dotnet\|clojure\|ruby\|rust>` | Write the quality-tool article and report missing tools |
 | `swarm up` | Create worktrees, start pack agents, and start the handoff router |
@@ -376,7 +377,7 @@ Deeper reading:
 - [Squad advisor and daemon](docs/squad-s3.md)
 - [Squad approvals](docs/squad-s4.md)
 - [Squad hardening](docs/squad-hardening.md)
-- [Grok + Codex six-pack](docs/six-pack-grok-codex.md)
+- [Deterministic squad agent profiles](docs/squad-agent-profiles-spec.md)
 - [Quality bars](docs/quality-bars.md)
 - [Porting notes](PORTING.md)
 - [Build history](PLAN.md)

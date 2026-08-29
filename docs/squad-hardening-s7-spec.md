@@ -1,5 +1,7 @@
 # Squad hardening S7 — Daemon-owned transitions specification
 
+Status: **IMPLEMENTED AND VERIFIED — 2026-08-26.**
+
 This slice implements S7a and S7b from
 [squad-hardening.md](squad-hardening.md): the daemon-only assignment
 transitions fail closed when anything but the daemon runs them (S7a),

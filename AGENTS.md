@@ -17,8 +17,8 @@ is the authoritative history.
 | `prompts/` | SOURCE OF TRUTH for constitution, articles, role prompts, contracts, worker-common. Installed copies live in projects under `swarmforge/`; edit `prompts/` and sync both |
 | `packs/*.conf` + `*.prompt` | Pack presets + chain articles |
 | `toolsets/*.edn` | Quality-tool profiles keyed by purpose (dotnet, clojure, ruby, rust) |
-| `test/smoke.sh` | 250+ checks; the executable spec. MUST be green before any commit |
-| `docs/` | Designs: squad-v2/s3/s4, squad-hardening (proposed S5+), six-pack-grok-codex, quality-bars, choosing-a-mode, pack retirement |
+| `test/smoke.sh` | 375 checks; the executable spec. MUST be green before any commit |
+| `docs/` | Designs and specs: squad-v2/s3/s4, hardening S5-S7, agent profiles, quality bars, choosing-a-mode, pack retirement |
 | `AGENTS.md`, `CLAUDE.md` | Parallel session guides; keep their shared operational facts synchronized (Grok discovers both) |
 | `PLAN.md`, `PORTING.md` | History; upstream parity vs original work |
 
@@ -78,8 +78,8 @@ pin `cd` explicitly (session cwd resets) and accept states idle OR done.
 
 ## Related
 
-- Latest operator handoff for a new session:
-  `docs/experiments/handoff-2026-08-26.md`
+- Historical hardening and provider-comparison briefs live in
+  `docs/experiments/`.
 - `~/Work/swarm-dogfood` — local-only .NET test project (packs + squad
   validated there). `~/Work/crap4net` → github.com/bandoyer/crap4net
   (split out; referenced by the dotnet toolset).

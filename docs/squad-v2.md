@@ -2,7 +2,8 @@
 
 > Status: complete — all four phases built and validated live 2026-08-15.
 > Phase details: [S3](squad-s3.md), [S4](squad-s4.md); history in PLAN.md.
-> Follow-on (proposed): [squad hardening S5+](squad-hardening.md).
+> Follow-on: [squad hardening](squad-hardening.md) S5–S7 is implemented;
+> S8 remains pending.
 
 Port of upstream swarm-forge's `squad` branch to the herdr runtime. Packs
 are assembly lines of fixed peers; squad is a hub: one persistent
@@ -35,9 +36,10 @@ the process, and nothing but the daemon touches main.
 | Approvals surface | web dashboard (`squadd/web.clj`) | CLI (`swarm squad approvals`) + `herdr notification show`; web UI deferred |
 | Leader wake-ups | tmux send-keys | `herdr agent prompt squad-leader` (existing router) |
 
-Worker backend per template stays configurable (upstream defaults
-reviewer-type templates to a different model than implementers —
-cross-model checking worth keeping).
+Worker profiles can be configured globally, per template, or per assignment;
+see [deterministic agent profiles](squad-agent-profiles-spec.md). This retains
+the useful upstream option of assigning reviewer-type work to a different
+provider than implementation work.
 
 ## State model — `.swarmforge/squad/`
 
@@ -46,48 +48,47 @@ All durable, all file-based, same philosophy as the handoff queue
 
 ```
 themes/<theme-id>/
-  theme.md  module-map.md  implementation-order.md  status.edn
-stories/<story-id>/packet.edn        # stage records: {stage, assignment, branch, sha}
+  theme.md  status.edn               # lightweight assignment grouping
 assignments/<assignment-id>/
   assignment.md                      # generated instructions handed to the worker
-  status.edn                         # created|spawned|result|accepted|rejected|merged
+  status.edn  result.handoff         # lifecycle plus the worker result
+workers/<worker-name>.edn            # durable worker identity and profile
+spawn-requests/<assignment-id>.edn   # leader request consumed by squadd
 approvals/<approval-id>.edn          # gate, target, state, detail
+leader.edn                           # durable leader profile
 events.log                           # append-only, timestamped (feeds `swarm logs`)
 ```
 
-## Contracts — `role-templates/<t>.contract.edn`
+Module maps, implementation-order gating, and per-story packets were deferred
+from v2. Themes are deliberately lightweight reporting groups.
+
+## Contracts — `swarmforge/contracts/<role>.contract.edn`
 
 ```edn
-{:role "implementer"
- :may-web-search false  :may-spawn false  :may-talk-to-user false
- :required-tools ["boundaries"]          ; toolset purposes, not tool names
- :writes ["production-code" "unit-tests"]
- :artifact-roots ["src/" "tests/"]
- :required-evidence [:unit-tests :acceptance-or-na]
- :singleton false}                       ; merger: true, plus depth cap
+{:artifact-roots ["src/" "tests/"]
+ :required-evidence
+ [{:name "tests-green" :pattern "(?i)tests? passed|dotnet test|bb test"}]}
 ```
 
-Enforcement points (this is what upgrades discipline from prose to law):
+Contracts are checked when a role queues a `git_handoff`:
 
-1. **Spawn time** — the worker's bootstrap is assembled from
-   worker-common protocol + role template + contract + generated
-   assignment; capability flags become explicit prohibitions.
-2. **Result time** — when a worker's handoff lands, the daemon validates:
-   diff touches only `artifact-roots`; `required-evidence` fields present
-   in the result manifest; required tools actually invoked (evidence
-   headers name commands + outputs). Violation → assignment rejected with
-   a repairable reason, not merged.
-3. **Merge time** — daemon-only `merge-ready`/`accept-merge`; the leader
-   physically cannot merge.
+1. changed paths must stay under `:artifact-roots`;
+2. each `:required-evidence` regular expression must match the commit
+   message;
+3. a contract with `:forbid-git-handoff true` may re-deliver only a worker's
+   recorded result commit.
 
-Contract enforcement also back-ports to the packs (phase S1): pack roles
-get optional contracts, and `done_with_current` gains evidence checking.
+Squad workers inherit their role template's contract. The stock leader
+contract uses the third rule to block authored product handoffs while leaving
+record operations and notes legal. The daemon alone performs accepted merges.
+Spawn-time capability flags and direct verification that a named tool ran are
+not implemented; see [the hardening status](squad-hardening.md).
 
 ## Delivery phases
 
 **S1 — Contracts & evidence enforcement** *(hardens existing packs immediately)*
-Contract schema + loader; evidence manifest format; validation in the
-result path; contracts for the 8 pack roles. No new agents or daemons.
+Contract schema + loader; path and commit-message evidence validation in the
+handoff path; stock contracts for pack roles. No new agents or daemons.
 
 **S2 — Transient workers + squad-leader**
 `swarm squad` launcher (leader + troubleshooter, persistent);
@@ -103,21 +104,23 @@ usable, human-advised squad.
 sole main-git owner; merger template + `max_merger_depth`.
 
 **S4 — Themes, approvals, reporting**
-Theme/story/packet records; module map + implementation-order gating;
-approval gates (CLI + herdr notifications); `swarm squad report`.
+Lightweight theme records; approval gates (CLI + herdr notifications);
+`swarm squad report`. Story packets, module maps, and implementation-order
+gating remain deferred.
 
-Each phase lands runnable and dogfooded before the next starts — same
-cadence as v1.
+Each phase landed runnable and was dogfooded before the next started — the
+same cadence as v1.
 
 ## Testing strategy
 
 - **Headless simulator** (upstream precedent: `squad_simulator`): scripted
-  fake workers + `SWARMFORGE_WAKE_CMD=none` drive full workflows in CI
+  fake workers + `SWARMFORGE_WAKE_CMD=none` drive full workflows
   with zero LLM cost — the advisor and daemon are deterministic, so their
   behavior is exactly testable.
-- Smoke-test extensions per phase (contracts: rejection paths; spawn:
-  capacity caps; advisor: conformance against workflow-example traces).
-- Dogfood: a theme of 2–3 stories on the calculator app, live agents.
+- The smoke suite covers contract rejection paths, capacity, every advisor
+  row, daemon merge/conflict/retire behavior, approvals, and recovery.
+- Live dogfood validated leader judgment, daemon-owned spawn/merge/retire,
+  and a human-gated merge.
 
 ## Non-goals (v2)
 

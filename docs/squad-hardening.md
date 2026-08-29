@@ -1,14 +1,15 @@
 # Squad hardening — Design
 
-> Status: proposed. Nothing built yet.
-> Continues [squad v2](squad-v2.md) (S1–S4 complete). Does not reopen
+> Status: partially complete. S5, S6, S7a, and S7b are implemented and
+> smoke-verified; deterministic agent profiles extend S6. S7c is deferred
+> and S8 remains pending.
+> Continues [squad v2](squad-v2.md) (S1–S4 complete) without reopening
 > the three-brain split.
 
-Squad v2 works when every agent stays alive and every actor stays inside
-its lane. Live runs have shown two classes of failure that the state
-machine cannot currently see: a worker that dies, and a leader (or
-worker) that *can* operate mechanism even though the prompts say it
-must not. This document is the follow-on plan.
+Live squad runs exposed failure modes beyond v2: dead workers were invisible
+to the state machine, provider choice was not durable, and mechanism ownership
+depended too heavily on prompts. This document records the resulting
+hardening plan and its current implementation status.
 
 ## Findings (squad-specific)
 
@@ -17,14 +18,15 @@ The pack runtime has its own gaps ([prompt sync](prompt-sync.md),
 regex). Those are real, and they are not this plan. What follows is
 what actually breaks **squad**.
 
-### 1. Dead workers stall the squad silently
+### 1. Dead workers stalled the squad silently — resolved by S5
 
 GitHub issue
 [#2](https://github.com/bandoyer/swarm-forge-herdr/issues/2). Highest
 priority.
 
-Worker records only move through `:allocated -> :active -> :retired`.
-Nothing observes agent death. After a herdr restart, crash, or reboot:
+Before S5, worker records moved only through
+`:allocated -> :active -> :retired`; nothing observed agent death. After a
+herdr restart, crash, or reboot:
 
 - the worker record stays `:active`
 - its assignment stays `:spawned`, a state the advisor treats as "a
@@ -34,33 +36,37 @@ Nothing observes agent death. After a herdr restart, crash, or reboot:
 
 Confirmed on Windows (herdr has no live server handoff, so every upgrade
 kills in-flight agents). The same gap exists on Linux for a crashed
-worker. Manual recovery already works: retire the dead worker, reject
+worker. Manual recovery already worked: retire the dead worker, reject
 the orphaned assignment (`reject` accepts `:spawned` for this reason),
-replace, spawn. The state machine is sound. Detection is missing.
+replace, spawn. S5 added fail-closed Herdr reconciliation, a three-poll
+absence threshold with launch grace, and advisor row 14 (`report-orphan`).
 
-### 2. "Daemon-only" is a comment
+### 2. "Daemon-only" was a comment — guarded by S7a and S7b
 
-`squad_assign` documents `merge` / `merge-blocked` as daemon-only
-(`swarmforge/scripts/squad_assign.bb`). They are ordinary scripts. Any
-pane with a shell can mark an assignment `:merged` without `git merge`,
-or `:merge-blocked` without a conflict. `squadd` is the *intended* sole
-owner of main; it is not the *enforced* one.
+Before S7, `squad_assign` documented `merge` / `merge-blocked` as daemon-only
+(`swarmforge/scripts/squad_assign.bb`), but they were ordinary scripts. Any
+pane with a shell could mark an assignment `:merged` without `git merge`,
+or `:merge-blocked` without a conflict. `squadd` was the intended sole owner
+of main without a mechanism-level accident boundary.
 
-The same honor system covers the leader's other bans: it sits in the
-project root (`bin/swarm` `squad-up!`), has no contract, and is one
+The same honor system covered the leader's other bans: it sat in the
+project root (`bin/swarm` `squad-up!`), had no contract, and was one
 `git commit` away from authoring product artifacts. S3 removed the
 *habit* of the leader merging. It did not remove the *ability*.
 
-This is not the same severity as (1). Prompt-following leaders behave.
-A confused or jailbroken leader is how every live governance gap in
-early squad runs started.
+S7a now gates daemon-owned assignment transitions with
+`SWARMFORGE_SQUADD`; S7b installs a leader contract that forbids new product
+commit handoffs while allowing record work and re-delivery of a worker's
+recorded result. These are accident boundaries, not an unforgeable security
+boundary; the optional S7c hook remains deferred.
 
-### 3. Transient workers always launch as Claude
+### 3. Transient workers always launched as Claude — resolved by S6
 
-`squad-spawn!` in `bin/swarm` starts every worker with `--kind claude`,
-regardless of the leader's kind or the template. A Codex or Grok
-leader therefore runs a mixed-provider squad that cannot be configured.
-The six-pack work can pick Grok and Codex per role; squad cannot.
+Before S6, `squad-spawn!` started every worker with `--kind claude`,
+regardless of the leader's kind or the template. S6 made worker kind durable
+configuration and assignment data. The later
+[agent-profile slice](squad-agent-profiles-spec.md) added deterministic model
+and effort pins for leaders, defaults, templates, and individual assignments.
 
 ### 4. Crash durability of records is weaker than the handoff queue
 
@@ -75,18 +81,20 @@ during `swarm_handoff` leaves `sequence.lock` in that worktree; the
 next outbound handoff spins forever. Packs share this; squad workers
 hit it on every result.
 
-### 5. Design overclaim: contracts vs capability flags
+### 5. Design overclaim: contracts vs capability flags — partly resolved
 
-[squad-v2.md](squad-v2.md) describes spawn-time flags
+Earlier revisions of [squad-v2.md](squad-v2.md) described spawn-time flags
 (`:may-web-search`, `:may-spawn`, `:required-tools`) and result-time
 checks that required tools actually ran. Implemented contracts are
 `:artifact-roots` plus regexes over the commit message, enforced at
 `swarm_handoff`. Empty `:artifact-roots` is not a "writes nothing"
-sentinel — an absent contract means no enforcement at all, so the
-leader cannot be gated by installing an empty one.
+sentinel and an absent contract still means no enforcement. S7b added the
+explicit `:forbid-git-handoff` leader boundary. Spawn-time capability flags
+and proof that named tools actually ran remain unimplemented; current
+evidence checks match commit-message receipts.
 
-Out of scope for the first slices (it changes S1's evidence
-philosophy). Recorded so the design doc stops claiming it.
+The remaining capability work is out of scope for S5–S8 because it changes
+S1's evidence philosophy.
 
 ## Invariants this plan must not break
 
@@ -103,12 +111,13 @@ From `AGENTS.md` and [squad-s3.md](squad-s3.md):
 
 ## Delivery phases
 
-Each slice lands runnable, smoke-tested, and (for S5) dogfoodable
-before the next starts — same cadence as S1–S4.
+S5, S6, S7a, and S7b landed as independently specified, smoke-tested slices.
+S8 remains planned; S7c remains optional and deferred.
 
-### S5 — Dead-worker reconciliation
+### S5 — Dead-worker reconciliation ✅
 
-The issue #2 proposal, unchanged in substance.
+Implemented 2026-08-25 from issue #2. The final acceptance contract is in
+[the S5 specification](squad-hardening-s5-spec.md).
 
 **Mechanism** (`squadd` poll, after mechanical actions, before residual
 wake):
@@ -139,11 +148,13 @@ gains one sentence pointing at this row.
 K and the herdr-unreachable rule are the whole design. Do not resume
 uncommitted work. Slices restart by design.
 
-### S6 — Worker agent kind is data
+### S6 — Worker agent kind is data ✅
 
-Spawn records the agent kind; the launcher honors it.
+Implemented 2026-08-26. Spawn records the agent kind and the launcher honors
+it; [deterministic agent profiles](squad-agent-profiles-spec.md) now extend
+that record with optional model and effort pins.
 
-- `swarmforge/squad.conf` gains `worker_kind <kind>` (default
+- `swarmforge/squad.conf` supports `worker_kind <kind>` (default
   `claude`, matching today's behavior).
 - `squad_spawn_request` may override per assignment
   (`create <id> <template> [kind]`).
@@ -160,32 +171,30 @@ providers wise — that is an operator choice, same as pack conf.
 
 ### S7 — Make daemon-owned transitions actually daemon-owned
 
-Two layers. Land the first; the second is optional hardening.
+S7a and S7b were implemented 2026-08-26. S7c remains optional and deferred.
 
-**S7a — env gate (accidents).** `squadd` already sets `SWARM_BIN` in
-its extra env. Add `SWARMFORGE_SQUADD=1` to that map. `squad_assign
+**S7a — env gate (accidents) ✅.** `squadd` sets
+`SWARMFORGE_SQUADD=1` in its child environment. `squad_assign
 merge` and `merge-blocked` die 2 `DAEMON_ONLY` unless that env is set.
-The leader's prompt already forbids these commands; now they also fail
+The leader's prompt forbids these commands, and they also fail
 closed if it tries.
 
 This stops a prompt-following leader. It does not stop a leader that
 exports the variable. Honest about that.
 
-**S7b — leader contract (authoring).** Give `squad-leader` a stock
-contract whose artifact roots are empty *and* whose meaning is "no
-git_handoff of a product commit." That requires a schema change:
-today a missing contract means "no enforcement." Add
-`:forbid-git-handoff true` (or treat a present contract with empty
-`:artifact-roots` as a total write ban, and never treat absence that
-way). The leader can still write assignment records; those are not
-git_handoffs.
+**S7b — leader contract (authoring) ✅.** The stock `squad-leader`
+contract sets `:forbid-git-handoff true`. It blocks new product commit
+handoffs while preserving assignment-record work, notes, and rework handoffs
+that carry a worker's recorded result commit.
 
-**S7c — git hook (optional, later).** An `update` hook on the main
-branch that refuses merges unless the committer matches the daemon's
-identity. Real unforgeability. Defer until S7a/S7b are lived with;
-hooks are per-clone and easy to skip with `--no-verify`.
+**S7c — stronger local Git guard (optional, later).** A
+`reference-transaction` hook could refuse protected-branch ref changes that
+do not come through the daemon. A normal `update` hook is receive-pack-only
+and would not guard local merges. This would still be an accident boundary,
+not true unforgeability against another process running as the same user;
+specify the threat model before implementing it.
 
-### S8 — Atomic records and stale locks
+### S8 — Atomic records and stale locks — pending
 
 Shared with packs; cheapest to do from the squad side because
 `write-record!` is the common writer.
@@ -203,7 +212,7 @@ block the next handoff.
 
 ## Testing
 
-All of this is file-state plus `herdr-try`, so it tests headlessly:
+The implemented slices are covered headlessly by the smoke suite:
 
 - S5: fake `herdr` on PATH that omits a worker for K polls, then
   assert retire + `worker-lost` + leader wake. A failing `agent list`
@@ -212,11 +221,11 @@ All of this is file-state plus `herdr-try`, so it tests headlessly:
 - S6: kind default and override, as above.
 - S7a: `merge` without the env exits 2; `squadd --once` can still
   merge.
-- S8: lock steal and atomic write, as above.
+- S8 remains planned: lock steal and atomic-write checks land with that slice.
 
-Live dogfood for S5: kill herdr mid-assignment (the #2 drill) and
-confirm the leader is woken with `report-orphan` rather than sitting
-idle.
+S5's fake-Herdr matrix covers missing, present, malformed, and unreachable
+agent-list responses, independent miss streaks, launch grace, retirement, and
+leader wake-up behavior.
 
 ## Non-goals
 
@@ -228,26 +237,18 @@ idle.
 - Resuming a dead worker's uncommitted files.
 - Web dashboard, module maps, multi-project squads (still deferred).
 
-## Open questions
+## Resolved design questions
 
-1. K=3 at a 1s poll is ~3s. Is that long enough that a slow
-   `agent start` cannot look dead? If spawn itself takes >3s of "agent
-   not in the list yet," S5 will retire a worker it just launched.
-   Mitigation: do not reconcile a worker whose `:state` is `:allocated`
-   and whose `:updated-at` is younger than 15s; only `:active` workers
-   enter the K-counter immediately.
-2. Should row 14 also cover `:created` with a spawn-request whose
-   worker vanished between allocate and activate? S5's retire path
-   already frees the slot; the leader would see `needs-spawn-request`
-   or a fresh `spawn` once the stale request is dropped. Probably no
-   extra row.
-3. S7a env var name: `SWARMFORGE_SQUADD` vs reusing a more general
-   `SWARMFORGE_MECHANISM`. Prefer the specific name; there is only one
-   mechanism owner.
+1. S5 uses K=3 successful misses. A newly allocated worker receives 15
+   seconds of launch grace; active workers enter the counter immediately.
+2. Advisor row 14 covers only `:spawned` orphan assignments. Existing
+   created/spawn-request actions already cover pre-activation failures.
+3. The S7a gate is the mechanism-specific `SWARMFORGE_SQUADD`.
 
-## Suggested order of work
+## Remaining work
 
-S5 first (live failure). S6 next if the Grok/Codex six-pack is going
-to have a squad counterpart; otherwise S7a is the cheaper correctness
-win. S8 whenever a crash-corruption shows up, not before — it is
-real but has not been the live incident.
+- S8: atomic squad records and stale `sequence.lock` recovery.
+- S7c: an optional local ref guard if the project later needs a stronger
+  accident boundary than S7a/S7b.
+- Prompt sync and pack blockers remain separate designs rather than squad
+  hardening slices.

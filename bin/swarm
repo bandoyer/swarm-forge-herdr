@@ -3,7 +3,7 @@
 ;;
 ;; Usage (run from your project's root, inside a running `herdr` session):
 ;;   swarm init [pack]      copy a pack preset + prompts into the project
-;;                          (default pack: six-all)
+;;                          (default pack: six-cg)
 ;;   swarm switch <pack>    change packs: replace conf + pack article, add
 ;;                          missing role prompts; project/toolset kept
 ;;   swarm toolset <name>   install a quality-toolset article
@@ -85,7 +85,7 @@
 (defn parse-conf []
   (when-not (fs/exists? conf-file)
     (die (str "No " conf-file)
-         "Run `swarm init <pack>` first (packs: two, four, six, adversaries)."))
+         "Run `swarm init [pack]` first (default: six-cg; packs: two, adversaries, four, six, six-cg, six-all)."))
   (let [rows
         (for [[line-no line] (map-indexed vector (str/split-lines (slurp (str conf-file))))
               :let [trimmed (str/trim line)]
@@ -156,7 +156,7 @@
     (when (protected-branches branch)
       (die (str "Refusing to start coder in the project root on protected branch '"
                 branch "'.")
-           "Use an isolated coder worktree, such as the six-all or six-cg pack,"
+           "Use an isolated coder worktree, such as the six-cg or six-all pack,"
            "or switch the project root to a review/<task> branch first."))))
 
 (defn sync-scripts! [rows]
@@ -382,7 +382,7 @@
         (when (fs/exists? contract)
           (install! contract (fs/path target "contracts" (str role ".contract.edn"))))))))
 
-(def default-pack "six-all")
+(def default-pack "six-cg")
 
 (defn init! [pack]
   (let [pack (or pack (do (println (str "No pack given; defaulting to " default-pack)) default-pack))
@@ -412,7 +412,7 @@
     (when-not (and pack (fs/exists? source))
       (die (str "Unknown pack: " pack)))
     (when-not (fs/exists? conf-file)
-      (die "No swarm here yet — use `swarm init <pack>` instead."))
+      (die "No swarm here yet — use `swarm init [pack]` instead."))
     (fs/copy source conf-file {:replace-existing true})
     (println "Replaced" (str conf-file))
     (fs/copy (fs/path tool-root "packs" (str pack ".prompt"))
@@ -780,7 +780,7 @@
 
 (defn status! []
   (println "project:" (str project-root))
-  (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init <pack>`)"))
+  (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init [pack]`)"))
   (doseq [daemon [handoffd-daemon squadd-daemon]]
     (println (format "%-9s" (str (:name daemon) ":"))
              (if (daemon-running? daemon)
@@ -1110,6 +1110,6 @@
     "prompt" (prompt! (second args) (str/join " " (drop 2 args)))
     "squad" (run-squad! (vec (rest args)))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init <pack> | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | retire | status | logs [n]]")))
+         "Usage: swarm [init [pack] | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | retire | status | logs [n]]")))
 
 (-main *command-line-args*)

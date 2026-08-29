@@ -1,5 +1,7 @@
 # Squad hardening S5 — Dead-worker reconciliation specification
 
+Status: **IMPLEMENTED AND VERIFIED — 2026-08-25.**
+
 This slice implements S5 from [squad-hardening.md](squad-hardening.md):
 the squad daemon detects worker agents that have disappeared, retires
 them through the existing mechanism, and exposes their orphaned

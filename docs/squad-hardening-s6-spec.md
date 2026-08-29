@@ -1,5 +1,7 @@
 # Squad hardening S6 — Worker agent kind is data specification
 
+Status: **IMPLEMENTED AND VERIFIED — 2026-08-26.**
+
 This slice implements S6 from [squad-hardening.md](squad-hardening.md):
 the agent kind of a transient squad worker becomes recorded data that the
 launcher honors, instead of the literal `"claude"` hard-coded in

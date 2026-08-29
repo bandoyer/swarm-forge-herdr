@@ -36,10 +36,6 @@ reviewer has caught durability bugs, log injection, and argv injection.
 Cost: 2 agents; loops until clean, so hard tasks cost more — that's the
 feature.
 
-Use `six-all` for the review-gated Fable, Codex, and Grok pipeline. Use
-`six-cg` when the same isolated human-integration boundary is wanted without
-Claude.
-
 ### four-pack — specifier → coder → refactorer → architect
 *The spec-driven loop.* Requirements are pinned before code exists;
 structure is reviewed after.
@@ -62,6 +58,10 @@ project has real tooling (see `toolsets/`) so evidence can be
 
 Cost: 6 agents, 5 chain handoffs + a terminal broadcast. Most expensive
 pack — reserve it for work that deserves proof.
+
+Bare `swarm init` selects `six-cg`, the isolated Codex + Grok pipeline.
+Use `six-all` when the same human-integration boundary should add Fable for
+specification and architecture.
 
 ## The squad (dynamic hub)
 

@@ -39,7 +39,7 @@ Original text (upstream is unlicensed), same methodology. Done 2026-08-15.
   (template), plus a per-pack `pack.prompt` chain article
 - Roles: `specifier`, `architect`, `coder`, `refactorer`, `cleaner`,
   `hardener`, `QA`, `reviewer`
-- Packs as config presets; `swarm init <pack>` installs conf + prompts
+- Packs as config presets; `swarm init [pack]` installs conf + prompts
 - `bin/import-upstream` — fetch upstream's originals for users who want them
 
 ## Phase 3 — Toolset profiles ✅
@@ -102,7 +102,7 @@ the guarded `swarm retire` terminal operation verifies merged role tips, clean
 worktrees, and drained handoffs before removing linked role worktrees and local
 branches. Design: `docs/pack-retirement.md`.
 
-## Phase 5 — v2 (in progress; design: docs/squad-v2.md)
+## Phase 5 — v2 (complete; design: docs/squad-v2.md)
 
 - [x] S1 contracts & evidence enforcement (2026-08-15): per-role
   `*.contract.edn` (artifact roots + required evidence), hard-block
@@ -114,7 +114,8 @@ branches. Design: `docs/pack-retirement.md`.
   spawn/retire`, cross-registry validation, dynamic roles.tsv routing so
   the router serves workers automatically), `swarm squad up` (persistent
   leader), worker-common + squad-leader prompts. 76 smoke checks. Live
-  squad dogfood pending.
+  live S2 dogfood was pending at this checkpoint; the S3 validation below
+  later exercised the full leader/worker lifecycle.
 - [x] S3 advisor + daemon git ownership (2026-08-15): swarm-built
   `squad_spawn_request` + `squad_next` (10-row action table, exhaustive
   smoke) and `squadd` (mechanical transitions, sole main-git owner,
@@ -131,9 +132,9 @@ branches. Design: `docs/pack-retirement.md`.
   **Squad v2 complete.**
 - Later: gherkin-mutator adapter; more toolsets (TypeScript, Python)
 
-## Phase 6 — Squad hardening + Grok/Codex six-pack (proposed)
+## Phase 6 — Squad hardening + mixed-provider packs (in progress)
 
-Designs, nothing built yet:
+Implemented hardening and remaining work:
 
 - [x] Quality bars: universal = fast suite only; cleaner contract no
       longer demands CRAP/jscpd receipts — `docs/quality-bars.md`
@@ -143,6 +144,8 @@ Designs, nothing built yet:
       `docs/squad-hardening-s6-spec.md`
 - [x] S7a daemon-only env gate; S7b leader contract (2026-08-26) —
       `docs/squad-hardening-s7-spec.md`
+- [ ] S7c optional stronger local Git guard (deferred; the S7a/S7b accident
+      boundaries are the current policy and the threat model needs a spec)
 - [x] S6b deterministic squad agent profiles (2026-08-27): project policy
       pins leader/default/template/assignment kind, model, and effort;
       durable records remain the launch source; legacy kind-only squads stay
@@ -154,3 +157,5 @@ Designs, nothing built yet:
 
 - 2026-08-15: MIT license; Babashka runtime; packs as presets not branches;
   original prompts + upstream import script (upstream has no LICENSE).
+- 2026-08-29: bare `swarm init` defaults to the isolated Codex + Grok
+  `six-cg` pack; `six-all` remains the Fable + Codex + Grok alternative.

@@ -462,10 +462,13 @@ ok "exactly six packs have matching articles and survive initialization"
 DEFAULT_PACK_PROJECT="$WORK/default-pack"
 mkdir -p "$DEFAULT_PACK_PROJECT"
 (cd "$DEFAULT_PACK_PROJECT" && "$TOOL_ROOT/bin/swarm" init >/dev/null)
-diff -q "$TOOL_ROOT/packs/six-all.conf" \
+diff -q "$TOOL_ROOT/packs/six-cg.conf" \
   "$DEFAULT_PACK_PROJECT/swarmforge/swarmforge.conf" >/dev/null \
-  || fail "bare swarm init should select six-all"
-ok "bare swarm init defaults to six-all"
+  || fail "bare swarm init should select six-cg"
+diff -q "$TOOL_ROOT/packs/six-cg.prompt" \
+  "$DEFAULT_PACK_PROJECT/swarmforge/constitution/articles/pack.prompt" >/dev/null \
+  || fail "bare swarm init should install the six-cg pack article"
+ok "bare swarm init defaults to six-cg"
 
 step "Rust toolset writes a complete quality article"
 RUST_TOOLSET_PROJECT="$WORK/rust-toolset"
