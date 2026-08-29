@@ -1,102 +1,97 @@
 # Choosing a mode
 
-Five modes, one continuum: from **fixed process** (packs) to **delegated
-judgment** (squad). Packs are assembly lines you feed; the squad is a
-foreman you brief. Pick a pack when you already know what process the
-work needs; pick the squad when deciding-the-process is itself the work.
+Choose the smallest process that can prove the task is done. Agent count is
+not a complexity score: requirement ambiguity, consequence of failure,
+available evidence, and genuinely independent workstreams are what matter.
 
-Among the packs, size the pipeline to the *evidence* you need: two-pack
-work ends up **tidy**, adversaries work ends up **attacked**, four-pack
-work ends up **specified and structurally reviewed**, six-pack work ends
-up **proven**.
+## Solo
 
-## The packs (static pipelines)
+Use one normal Codex session when the change is bounded, intent is clear, and
+existing focused verification is an adequate gate. This is the cheapest and
+usually fastest path.
 
-### two-pack — coder → cleaner
-*The fast loop.* Implementation plus an audit pass: dedup, naming,
-honest numbers from whatever quality tools the project declares.
+Escalate when a second independent judgment or a specific evidence regime has
+clear value, not merely because the task touches several files.
 
-Use when: small well-understood features; prototyping; projects with a
-strong test culture where the suite is the real gate; you want speed and
-a second set of eyes, not a tribunal.
+## Directed — Director → builder → reviewer
 
-Cost: 2 agents, 2 handoffs per slice. Cheapest.
+`directed-cg` is the normal swarm recommendation for one coherent task. The
+user's Codex session acts as Director, Grok 4.6 High builds, and Codex Sol Max
+reviews the exact candidate read-only. Workers never talk directly. The
+Director allows one repair, then accepts or stops blocked.
+
+Use when: an implementation is serial but an independent skeptical review is
+worth its cost; scope can be stated up front; you want stronger judgment
+without a fixed multi-role ceremony.
+
+Do not use when: one agent plus existing tests is enough, or when several
+independent slices can truly progress at the same time.
+
+Cost: 2 workers, at most 2 build turns and 2 review turns, with a 90-minute
+default wall limit. No handoff router. See [directed-cg.md](directed-cg.md).
+
+## Fixed packs
+
+Fixed packs encode a review sequence. Their router persists a per-task handoff
+budget and opens a circuit on a repeated same-tree route, so prompt mistakes
+cannot create an unbounded loop.
+
+### two — coder → cleaner
+
+Use when: the user explicitly wants the historical implementation-plus-cleanup
+pipeline. Cost: 2 agents and 2 handoffs.
 
 ### adversaries — coder → reviewer
-*The cheapest strong gate.* One hostile reviewer replaces a pipeline:
-it re-runs everything itself, attacks edge cases, hand-applies mutants,
-and sends findings back as failing (gated) tests until the work survives.
 
-Use when: infrastructure, runtime, or security-adjacent code; languages
-where metric tooling (coverage/mutation) is weak or absent — review
-substitutes for tools; anywhere the dominant risk is a *subtle bug*
-rather than a process failure. This repo builds itself in this mode; its
-reviewer has caught durability bugs, log injection, and argv injection.
+Use when: the user explicitly wants a hostile reviewer that can commit a
+reproduced failing test back to the coder. One finding authorizes one repair; a
+second failed review stops. Cost: 2 agents and at most 4 handoffs.
 
-Cost: 2 agents; loops until clean, so hard tasks cost more — that's the
-feature.
+### four — specifier → coder → refactorer → architect
 
-### four-pack — specifier → coder → refactorer → architect
-*The spec-driven loop.* Requirements are pinned before code exists;
-structure is reviewed after.
+Use when: ambiguity in what to build or architectural boundaries is the main
+risk, and pinning a specification before implementation is valuable. Cost: 4
+agents and 4 handoffs.
 
-Use when: ambiguity in *what to build* is the main risk; design and
-boundaries matter (the architect rules on structure); you want the
-discipline of specification without heavyweight verification tooling.
+### six — specifier → coder → cleaner → architect → hardener → qa
 
-Cost: 4 agents, ~4 handoffs per slice.
+Use when: correctness is expensive to get wrong and the project has meaningful
+acceptance, coverage, mutation, complexity, and architecture tools. A first QA
+finding authorizes one full repair pass; a second stops. Cost: 6 agents, up to
+12 deliveries with one repair and terminal broadcast.
 
-### six-pack — specifier → coder → cleaner → architect → hardener → qa
-*The evidence regime.* Everything four-pack does, plus a hardener that
-must produce coverage/complexity/mutation receipts (kill the mutants or
-justify each survivor, in writing) and a qa that verifies delivered
-behavior against the specification, not the diff.
+Bare `swarm init` selects `six-cg`, the isolated Codex + Grok six-pack. Use
+`six-all` when the same human-integration boundary should add Fable for
+specification and architecture. The launcher default is not a recommendation
+that every task needs six agents.
 
-Use when: correctness is the product; regressions are expensive; the
-project has real tooling (see `toolsets/`) so evidence can be
-*demonstrated* rather than asserted; release-quality work.
+## Squad
 
-Cost: 6 agents, 5 chain handoffs + a terminal broadcast. Most expensive
-pack — reserve it for work that deserves proof.
+Squad is one persistent judgment-only leader plus transient contract-bound
+workers, a deterministic advisor, and a daemon that owns spawning, retirement,
+and merges.
 
-Bare `swarm init` selects `six-cg`, the isolated Codex + Grok pipeline.
-Use `six-all` when the same human-integration boundary should add Fable for
-specification and architecture.
+Use when: you can name multiple independent workstreams, decomposition must
+adapt during a longer program, or an ongoing stream of work justifies a
+persistent leader.
 
-## The squad (dynamic hub)
+Do not use when: the work is one slice. Shared files or sequential dependencies
+erase the benefit of parallel workers while retaining all coordination cost.
 
-squad-leader (persistent judgment) + transient contract-bound workers +
-a deterministic advisor + a daemon that owns everything irreversible.
-
-Use when: the work doesn't arrive pre-sliced — multi-part features,
-parallel independent tasks, an ongoing stream of product work; when you
-want to *delegate decomposition* ("make this usable from the command
-line") and talk to one colleague instead of feeding a pipeline; when
-runs should be long-lived with a bounded, elastic workforce.
-
-Don't use when: the task is one obvious slice (a pack is less machinery
-for the same result), or when you want the guarantees of a *specific*
-fixed gate sequence — a pack IS that guarantee.
-
-Cost: elastic — leader plus as many workers as the work warrants, capped
-by `max_transient_agents`.
-
-## They compose
-
-The modes share one protocol, so the boundaries blur deliberately:
-squad workers are built from pack role templates; a leader routing
-implementer-then-reviewer assignments is running adversaries *inside*
-the squad; the six-pack's evidence bars reappear as the leader's
-acceptance checklist and as machine-enforced contracts. Mastering the
-packs teaches you what to ask the squad for.
+Cost: elastic, capped by `max_transient_agents`.
 
 ## Decision table
 
-| Situation | Mode |
+| Situation | Recommendation |
 |---|---|
-| Small known feature, fast iteration | two-pack |
-| Infrastructure / runtime / security-ish code | adversaries |
-| Requirements fuzzy; structure matters | four-pack |
-| Must *prove* quality; rich tooling exists | six-pack |
-| Needs decomposition, parallelism, or ongoing delegation | squad |
-| Unsure | start two-pack; escalate when a slice proves it needs more eyes |
+| Clear bounded change; existing tests are a sufficient gate | Solo |
+| One implementation; independent review is valuable | `directed-cg` |
+| Requirements or boundaries are the primary uncertainty | `four` |
+| Release-grade proof with a useful quality toolchain | `six-cg` |
+| Named independent workstreams or ongoing adaptive decomposition | Squad |
+| User specifically wants the legacy cleanup or hostile-review loop | `two` or `adversaries` |
+| Unsure | Start solo; escalate one level when a concrete risk proves the need |
+
+The included `skills/swarm-director` Codex skill applies this rubric after
+reading the target code and verification rather than guessing from the request
+alone.

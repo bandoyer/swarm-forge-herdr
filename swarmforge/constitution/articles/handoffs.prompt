@@ -1,7 +1,10 @@
 # Article: Handoffs
 
-Handoffs are the only way work moves between roles. The helper scripts are
-the only way you touch them.
+In pipeline mode, handoffs are the only way work moves between roles. The
+helper scripts are the only way you touch them.
+
+In directed mode, do not use handoffs at all. The Director assigns work and
+collects your result directly; skip the sending instructions below.
 
 ## Sending
 

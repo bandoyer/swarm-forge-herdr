@@ -1,0 +1,6 @@
+interface:
+  display_name: "Swarm Director"
+  short_description: "Choose and direct bounded agent swarms"
+  default_prompt: "Use $swarm-director to choose the smallest adequate profile and direct this task within explicit bounds."
+policy:
+  allow_implicit_invocation: true

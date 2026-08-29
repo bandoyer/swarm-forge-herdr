@@ -7,7 +7,7 @@
 ;;   swarm switch <pack>    change packs: replace conf + pack article, add
 ;;                          missing role prompts; project/toolset kept
 ;;   swarm toolset <name>   install a quality-toolset article
-;;   swarm up               start worktrees, agents, and the handoff router
+;;   swarm up               start worktrees and agents (plus the pipeline router)
 ;;   swarm bootstrap [role] (re)send role prompts to running agents
 ;;   swarm prompt <role> <text>   send a task to a role by its short name
 ;;   swarm squad <cmd>      squad mode: up | spawn | retire | status |
@@ -16,6 +16,8 @@
 ;;   swarm down             stop daemons and close the swarm workspace
 ;;   swarm retire           remove a fully integrated pack swarm
 ;;   swarm status           show swarm runtime state
+;;   swarm guard status     show open handoff circuit breakers
+;;   swarm guard reset <task>  reset one inspected task circuit
 ;;
 ;; swarmforge.conf format (upstream-compatible):
 ;;   window <role> <agent-kind> <worktree> [task|batch] [extra-cli-args...]
@@ -85,7 +87,7 @@
 (defn parse-conf []
   (when-not (fs/exists? conf-file)
     (die (str "No " conf-file)
-         "Run `swarm init [pack]` first (default: six-cg; packs: two, adversaries, four, six, six-cg, six-all)."))
+         "Run `swarm init [pack]` first (default: six-cg; packs: directed-cg, two, adversaries, four, six, six-cg, six-all)."))
   (let [rows
         (for [[line-no line] (map-indexed vector (str/split-lines (slurp (str conf-file))))
               :let [trimmed (str/trim line)]
@@ -127,7 +129,37 @@
             [duplicate n] (frequencies (map value rows'))
             :when (> n 1)]
       (die (format "Duplicate %s '%s' in swarmforge.conf" (name value) duplicate)))
+    ;; Validate the machine-readable comment while the configuration is
+    ;; already being checked. The router reads the same marker at delivery.
+    (try
+      (handoff-lib/max-handoffs-per-task project-root)
+      (catch clojure.lang.ExceptionInfo e
+        (die (ex-message e))))
     (vec rows)))
+
+(defn- conf-marker [marker]
+  (when (fs/exists? conf-file)
+    (let [quoted (java.util.regex.Pattern/quote marker)
+          prefix (re-pattern (str "^\\s*#\\s*" quoted ":"))
+          pattern (re-pattern (str "^\\s*#\\s*" quoted
+                                   ":\\s*(\\S+)\\s*$"))
+          marked (filter #(re-find prefix %)
+                         (str/split-lines (slurp (str conf-file))))]
+      (when (> (count marked) 1)
+        (die (str "Duplicate " marker " marker in " conf-file)))
+      (when-let [line (first marked)]
+        (or (second (re-matches pattern line))
+            (die (str "Invalid " marker " marker in " conf-file ": "
+                      (str/trim line))))))))
+
+(defn- configured-mode []
+  (let [mode (or (conf-marker "swarmforge-mode") "pipeline")]
+    (when-not (#{"pipeline" "directed"} mode)
+      (die (str "Unknown swarmforge-mode '" mode
+                "'; expected pipeline or directed.")))
+    mode))
+
+(defn- directed-mode? [] (= "directed" (configured-mode)))
 
 ;; --- project preparation --------------------------------------------------
 
@@ -230,7 +262,8 @@
 
 (defn bootstrap-prompt [role worktree-path]
   (let [role-prompt (fs/path project-root "swarmforge" "roles" (str role ".prompt"))
-        constitution (fs/path project-root "swarmforge" "constitution.prompt")]
+        constitution (fs/path project-root "swarmforge" "constitution.prompt")
+        directed? (directed-mode?)]
     (str "You are the '" role "' role in a SwarmForge-style swarm. "
          "Your registered worktree is " worktree-path " — do ALL work there, "
          "even if other role worktrees exist on disk. "
@@ -240,11 +273,20 @@
                   (str " and swarmforge/roles/" role ".prompt"))
                 " and follow them exactly. ")
            "Work only in this directory; hand completed work to other roles as commits. ")
-         "When you receive a handoff wake-up (or right now, and after every "
-         "completed task), run swarmforge/scripts/ready_for_next.sh and follow "
-         "its output. Send handoffs only through swarmforge/scripts/swarm_handoff.sh. "
-         "When your current task is fully complete, run "
-         "swarmforge/scripts/done_with_current.sh.")))
+         (if directed?
+           (str "This is directed mode: the human-facing Director is the only "
+                "coordinator. Wait for a direct assignment from the Director, "
+                "then do only that assignment and report concise evidence back. "
+                "Do not read or use the handoff queue, contact another worker, "
+                "broaden scope, integrate into a protected branch, or push. "
+                (when (= "reviewer" role)
+                  "You are read-only: do not edit tracked files or create commits. ")
+                "After reporting the commit SHA or review verdict, stop and wait.")
+           (str "When you receive a handoff wake-up (or right now, and after every "
+                "completed task), run swarmforge/scripts/ready_for_next.sh and follow "
+                "its output. Send handoffs only through swarmforge/scripts/swarm_handoff.sh. "
+                "When your current task is fully complete, run "
+                "swarmforge/scripts/done_with_current.sh.")))))
 
 (defn existing-workspace
   "The workspace recorded by a previous `swarm up`, if herdr still has it."
@@ -361,6 +403,14 @@
     (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.destroy)))
   (println name "stop requested."))
 
+(defn stop-and-wait! [daemon]
+  (stop-daemon! daemon)
+  (loop [attempt 0]
+    (cond
+      (not (daemon-running? daemon)) nil
+      (< attempt 50) (do (Thread/sleep 100) (recur (inc attempt)))
+      :else (die (str (:name daemon) " did not stop; refusing to change runtime mode.")))))
+
 ;; --- subcommands ----------------------------------------------------------
 
 (defn- install! [source target]
@@ -468,7 +518,14 @@
 (defn up! []
   (when-not (fs/exists? (fs/path project-root ".git"))
     (die "Run swarm from the root of a git repository."))
-  (let [rows (parse-conf)]
+  (let [rows (parse-conf)
+        directed? (directed-mode?)]
+    (when (and directed? (daemon-running? squadd-daemon))
+      (die "Cannot start directed mode while squadd is running."
+           "Run `swarm down`, then retry `swarm up`."))
+    (when (and directed? (daemon-running? handoffd-daemon))
+      (println "Stopping the pipeline router for directed mode.")
+      (stop-and-wait! handoffd-daemon))
     (ensure-coder-is-off-protected-branch! rows)
     (ensure-gitignore!)
     (ensure-worktrees! rows)
@@ -476,7 +533,9 @@
     (sync-scripts! rows)
     (write-roles-tsv! rows)
     (let [needs-attention (launch-agents! rows)]
-      (start-daemon! handoffd-daemon)
+      (if directed?
+        (println "handoffd disabled: directed workers receive only Director prompts.")
+        (start-daemon! handoffd-daemon))
       (println)
       (println "Swarm is up:" (str/join ", " (map :role rows)))
       (when (seq needs-attention)
@@ -486,7 +545,9 @@
         (println "(e.g. Claude Code's folder-trust prompt), then run:")
         (doseq [role needs-attention]
           (println "  swarm bootstrap" role)))
-      (println "Watch it in herdr; stop it with `swarm down`."))))
+      (if directed?
+        (println "Direct it with `swarm prompt <role> <text>`; stop it with `swarm down`.")
+        (println "Watch it in herdr; stop it with `swarm down`.")))))
 
 (defn bootstrap! [role-arg]
   (let [rows (parse-conf)
@@ -781,6 +842,7 @@
 (defn status! []
   (println "project:" (str project-root))
   (println "conf:   " (if (fs/exists? conf-file) (str conf-file) "MISSING (run `swarm init [pack]`)"))
+  (println "mode:   " (if (fs/exists? conf-file) (configured-mode) "unknown"))
   (doseq [daemon [handoffd-daemon squadd-daemon]]
     (println (format "%-9s" (str (:name daemon) ":"))
              (if (daemon-running? daemon)
@@ -793,7 +855,46 @@
               :let [[role _ path _ _ kind mode] (str/split line #"\t" -1)
                     profile (role-profile-record role squad-mode?)]]
         (println (str (format "role:    %-12s %-8s %-5s %s" role kind mode path)
-                      (profile-status-suffix profile)))))))
+                      (profile-status-suffix profile))))))
+  (let [circuits (try
+                   (handoff-lib/open-handoff-circuits project-root)
+                   (catch clojure.lang.ExceptionInfo e
+                     (die (ex-message e))))]
+    (doseq [{:keys [task deliveries reason]} circuits]
+      (println (str "guard:   OPEN task=" task
+                    " deliveries=" deliveries
+                    " reason=" reason)))))
+
+(defn guard! [args]
+  (case (first args)
+    "status"
+    (if (= 1 (count args))
+      (let [circuits (try
+                       (handoff-lib/open-handoff-circuits project-root)
+                       (catch clojure.lang.ExceptionInfo e
+                         (die (ex-message e))))]
+        (if (empty? circuits)
+          (println "GUARD_CLEAR")
+          (doseq [{:keys [task deliveries reason]} circuits]
+            (println (str "GUARD_OPEN: task=" task
+                          " deliveries=" deliveries
+                          " reason=" reason)))))
+      (die "Usage: swarm guard status"))
+
+    "reset"
+    (let [task (str/join " " (drop 1 args))]
+      (when (str/blank? task)
+        (die "Usage: swarm guard reset <task>"))
+      (when (daemon-running? handoffd-daemon)
+        (die "Stop handoffd before resetting a task circuit."
+             "Run `swarm down`, inspect the failed handoff, then retry."))
+      (let [reset? (try
+                     (handoff-lib/reset-handoff-guard! project-root task)
+                     (catch clojure.lang.ExceptionInfo e
+                       (die (ex-message e))))]
+        (println (str (if reset? "GUARD_RESET: " "GUARD_NOT_FOUND: ") task))))
+
+    (die "Usage: swarm guard [status | reset <task>]")))
 
 ;; --- squad (v2, S2): persistent leader + transient workers ----------------
 
@@ -879,6 +980,9 @@
 (defn squad-up! [profile-values]
   (when-not (fs/exists? (fs/path project-root ".git"))
     (die "Run swarm from the root of a git repository."))
+  (when (directed-mode?)
+    (die "Cannot start squad mode from a directed profile."
+         "Run `swarm switch six-cg` (or another pipeline pack) first."))
   (when (and (daemon-running? handoffd-daemon)
              (seq (roles-rows))
              (not-any? #(= leader-name (first %)) (roles-rows)))
@@ -1106,10 +1210,11 @@
     "down" (down!)
     "retire" (retire!)
     "status" (status!)
+    "guard" (guard! (vec (rest args)))
     "logs" (logs! (second args))
     "prompt" (prompt! (second args) (str/join " " (drop 2 args)))
     "squad" (run-squad! (vec (rest args)))
     (die (str "Unknown subcommand: " (first args))
-         "Usage: swarm [init [pack] | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | retire | status | logs [n]]")))
+         "Usage: swarm [init [pack] | switch <pack> | toolset <name> | up | bootstrap [role] | prompt <role> <text> | squad <cmd> | down | retire | status | guard <cmd> | logs [n]]")))
 
 (-main *command-line-args*)

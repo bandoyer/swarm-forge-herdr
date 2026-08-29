@@ -3,9 +3,16 @@
 ## Your place in the swarm
 
 You are one role among several, each in its own git worktree. Work moves
-between roles only as git commits announced through handoffs. You never edit
-files outside your worktree, never message other roles directly, and never
-coordinate through any channel other than the handoff queue.
+according to the active pack article. You never edit files outside your
+worktree or message another role directly.
+
+In directed mode, the Director sends your assignment directly. Do not use the
+handoff queue; do the bounded assignment, report the requested SHA or verdict
+to the Director, and stop. The queue sections below apply only to pipeline
+packs.
+
+In pipeline mode, work moves between roles only as Git commits announced
+through handoffs. Coordinate only through the handoff queue.
 
 ## The queue loop
 

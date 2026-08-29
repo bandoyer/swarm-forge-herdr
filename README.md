@@ -3,21 +3,22 @@
 A [Herdr](https://github.com/thinkerisme/herdr)-native port and extension
 of the [swarm-forge](https://github.com/unclebob/swarm-forge) methodology:
 role-based AI agent swarms, one Git worktree per production role, with work
-moving between agents only through validated commit handoffs.
+moving through validated commit handoffs or a bounded Director workflow.
 
 This repository replaces swarm-forge's tmux-specific runtime with Herdr and
 adds machine-enforced role contracts, deterministic squad workflow, daemon-
 owned merges, an append-only event log, and optional human approval gates.
 
-Two operating modes are available:
+Three operating modes are available:
 
 | Mode | Shape | Best for |
 |---|---|---|
+| **Directed** | The normal Codex session directs one builder and one read-only reviewer | One coherent task that benefits from independent review |
 | **Packs** | Fixed pipelines of two, four, or six roles | Work whose review process is already known |
 | **Squad** | One persistent leader with transient, assignment-bound workers | Work that needs decomposition, parallelism, or ongoing judgment |
 
 The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
-375-check headless smoke suite and has also been validated with live agents.
+389-check headless smoke suite and has also been validated with live agents.
 
 ## Requirements
 
@@ -29,6 +30,8 @@ The Herdr port, pack runtime, and squad v2 are complete. The protocol has a
 The bundled presets select their agent CLI explicitly:
 
 - The standard `two`, `four`, `six`, and `adversaries` presets use Codex.
+- `directed-cg` pairs a Grok 4.6 High builder with a Codex Sol Max reviewer;
+  the user's normal Codex session is the Director.
 - The default `six-cg` preset uses Codex for specification, coding, and QA;
   Grok cleans, architects, and hardens.
 - `six-all` adds Fable for specification and architecture while retaining
@@ -75,6 +78,39 @@ git -C "$HOME/.local/share/swarm-forge-herdr" pull --ff-only
 Existing projects keep their project-local prompts and contracts because they
 may contain deliberate customization; pulling this repository does not
 overwrite them.
+
+### Optional Codex skill
+
+The included `swarm-director` skill inspects a task, recommends the smallest
+adequate profile, and can direct a bounded run after authorization. Link it
+from a stable clone so repository updates remain visible to Codex:
+
+```sh
+ln -s "$HOME/.local/share/swarm-forge-herdr/skills/swarm-director" \
+  "$HOME/.codex/skills/swarm-director"
+```
+
+Then requests such as “swarm this change” can select solo, `directed-cg`, a
+fixed evidence pack, or squad from the actual task rather than from a default
+agent count.
+
+## Quickstart: directed review
+
+Use the low-ceremony directed profile for one bounded implementation with an
+independent review:
+
+```sh
+cd /path/to/your-project
+swarm init directed-cg
+# Customize and commit swarmforge/ as described below.
+swarm up
+swarm prompt builder "Task 'first-slice': <goal, scope, acceptance, verification>"
+```
+
+Directed mode does not start the handoff router. The Director prompts one
+worker at a time, allows at most one repair, and stops at `ACCEPT`, `BLOCKED`,
+or its configured time budget. See
+[Directed Codex + Grok workflow](docs/directed-cg.md).
 
 ## Quickstart: a pack
 
@@ -163,12 +199,13 @@ logs and provider session histories remain. See
 [`docs/pack-retirement.md`](docs/pack-retirement.md) for the complete safety
 contract.
 
-### Choosing a pack
+### Choosing a profile
 
 | Preset | Entry role | Pipeline | Provider/layout |
 |---|---|---|---|
+| `directed-cg` | `builder` | Director → builder → read-only reviewer; one repair maximum | Grok + Codex; isolated, no router |
 | `two` | `coder` | coder → cleaner → coder | Codex; coder uses project root |
-| `adversaries` | `coder` | coder ↔ hostile reviewer until clean | Codex; coder uses project root |
+| `adversaries` | `coder` | coder ↔ hostile reviewer; one repair maximum | Codex; coder uses project root |
 | `four` | `specifier` | specifier → coder → refactorer → architect | Codex; specifier uses root, later roles are isolated |
 | `six` | `specifier` | specifier → coder → cleaner → architect → hardener → QA | Codex; specifier uses root, later roles are isolated |
 | `six-cg` (default) | `specifier` | Isolated six-role evidence pipeline | Codex + Grok; human integration |
@@ -187,8 +224,9 @@ Both are terminal review pipelines: QA produces a candidate for explicit human
 approval rather than integrating it into the protected branch.
 
 See [Choosing a mode](docs/choosing-a-mode.md) for the evidence and cost
-tradeoffs: two-pack work ends up *tidy*, adversaries work *attacked*, four-pack
-work *specified and structurally reviewed*, and six-pack work *proven*.
+tradeoffs. Start solo when one agent can prove the change; use `directed-cg`
+when a second independent judgment is worthwhile; escalate only when a fixed
+evidence sequence or real parallel decomposition is necessary.
 
 ## Quickstart: a squad
 
@@ -197,8 +235,10 @@ request and reviews results; transient workers produce one assignment each;
 the deterministic advisor selects valid next actions; and `squadd` alone
 spawns workers, retires them, and merges accepted commits.
 
-Initialize any pack once to seed the project constitution and role templates.
-Using `six` installs the broadest standard template set:
+Initialize any pipeline pack once to seed the project constitution and role
+templates. A directed profile deliberately cannot start squad because its zero
+handoff budget would contradict squad routing. Using `six` installs the broadest
+standard template set:
 
 ```sh
 cd /path/to/your-project
@@ -291,7 +331,7 @@ the runtime scripts inside the active role worktrees.
 Ephemeral state is separate and should never be committed:
 
 ```text
-.swarmforge/   # queues, routing, assignment records, events, daemon logs/PIDs
+.swarmforge/   # queues, routing/guard state, assignments, events, daemon logs/PIDs
 .worktrees/    # linked Git worktrees for roles and transient workers
 ```
 
@@ -305,10 +345,11 @@ starts.
 | `swarm init [pack]` | Install a pack's config, constitution, prompts, and contracts; defaults to `six-cg` |
 | `swarm switch <pack>` | Replace the pack config/article while retaining project customization |
 | `swarm toolset <dotnet\|clojure\|ruby\|rust>` | Write the quality-tool article and report missing tools |
-| `swarm up` | Create worktrees, start pack agents, and start the handoff router |
+| `swarm up` | Create worktrees and start pack agents; start the router only for pipeline mode |
 | `swarm bootstrap [role]` | Resend role instructions after a startup dialog or restart |
 | `swarm prompt <role> <text>` | Send a task to a pack role |
 | `swarm status` | Show config, daemons, roles, agent kinds, and worktree paths |
+| `swarm guard status\|reset <task>` | Inspect or reset a stopped, reviewed handoff circuit |
 | `swarm logs [n]` | Interleave launcher, daemon, squad, and handoff lifecycle events |
 | `swarm squad ...` | Start and operate squad mode |
 | `swarm down` | Stop daemons and close the recorded Herdr workspace |
@@ -341,6 +382,11 @@ schema error, correct the commit or handoff draft, and retry. Do not bypass the
 gate. The most common first-run cause is an uncustomized artifact root or
 evidence pattern in `swarmforge/contracts/`.
 
+If the error starts with `HANDOFF_CIRCUIT_OPEN`, stop the swarm and inspect the
+task. `swarm guard status` shows the durable reason. After correcting the root
+cause, `swarm guard reset <task>` clears only that task while `handoffd` is
+stopped.
+
 ### A quality command is missing
 
 Run `swarm toolset` with your profile (`dotnet`, `clojure`, `ruby`, or `rust`)
@@ -359,6 +405,9 @@ agent with `herdr agent read <agent-name>`.
 - **The upstream handoff protocol is preserved.** Message types, helper-script
   contracts, output tokens, and exit codes remain compatible so unmodified
   upstream prompts can be imported deliberately.
+- **Automation is bounded mechanically.** Fixed packs persist per-task handoff
+  budgets and reject repeated same-tree routes. Directed runs have no router
+  and allow only one repair.
 - **Contracts are executable policy.** Each role declares writable artifact
   roots and required evidence; `swarm_handoff` blocks violations before work
   enters another agent's queue.
@@ -372,6 +421,7 @@ agent with `herdr agent read <agent-name>`.
 Deeper reading:
 
 - [Choosing a mode](docs/choosing-a-mode.md)
+- [Directed Codex + Grok workflow](docs/directed-cg.md)
 - [Pack retirement](docs/pack-retirement.md)
 - [Squad v2](docs/squad-v2.md)
 - [Squad advisor and daemon](docs/squad-s3.md)

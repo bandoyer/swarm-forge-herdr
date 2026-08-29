@@ -115,6 +115,20 @@ done
 [ "$PACK_OK" -eq 1 ] || fail "installed pack.prompt matches no packs/*.prompt"
 ok "installed pack.prompt matches a pack article"
 
+step "swarm-director skill ships a bounded, implicitly invocable runbook"
+grep -q '^name: swarm-director$' "$TOOL_ROOT/skills/swarm-director/SKILL.md" \
+  || fail "swarm-director skill has no valid name"
+grep -q 'allow_implicit_invocation: true' \
+  "$TOOL_ROOT/skills/swarm-director/agents/openai.yaml" \
+  || fail "swarm-director should be available for natural-language swarm requests"
+grep -q '90 minutes' \
+  "$TOOL_ROOT/skills/swarm-director/references/directed-run.md" \
+  || fail "directed runbook must retain its total wall budget"
+grep -q 'A second `NO-GO` is terminal' \
+  "$TOOL_ROOT/skills/swarm-director/references/directed-run.md" \
+  || fail "directed runbook must retain its one-repair limit"
+ok "swarm-director skill carries selection and terminal bounds"
+
 step "standard packs default every role to Codex"
 for pack in two four six adversaries; do
   conf="$TOOL_ROOT/packs/$pack.conf"
@@ -438,15 +452,83 @@ grep -qE '^window .* (codex|grok) (master|none) ' "$SIX_CG_CONF" \
   && fail "six-cg should isolate every role"
 ok "six-cg pins two providers behind human integration"
 
+step "directed-cg pins isolated workers and disables autonomous routing"
+DIRECTED_PROJECT="$WORK/directed-pack"
+DIRECTED_BIN="$WORK/directed-bin"
+DIRECTED_CALLS="$WORK/directed-herdr.calls"
+mkdir -p "$DIRECTED_PROJECT" "$DIRECTED_BIN"
+git -C "$DIRECTED_PROJECT" init -qb main
+git -C "$DIRECTED_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -q --allow-empty -m "initial"
+(cd "$DIRECTED_PROJECT" && "$TOOL_ROOT/bin/swarm" init directed-cg >/dev/null)
+DIRECTED_CONF="$DIRECTED_PROJECT/swarmforge/swarmforge.conf"
+grep -q '^# swarmforge-mode: directed$' "$DIRECTED_CONF" \
+  || fail "directed-cg must declare directed mode"
+grep -q '^# swarmforge-max-handoffs-per-task: 0$' "$DIRECTED_CONF" \
+  || fail "directed-cg must disable Git handoffs mechanically"
+grep -q '^window builder grok directed-builder task --model grok-4.6 --reasoning-effort high ' "$DIRECTED_CONF" \
+  || fail "directed-cg builder should pin Grok 4.6 High"
+grep -q '^window reviewer codex directed-reviewer task --model gpt-5.6-sol -c model_reasoning_effort=max ' "$DIRECTED_CONF" \
+  || fail "directed-cg reviewer should pin Sol Max"
+grep -qE '^window .* (master|none) ' "$DIRECTED_CONF" \
+  && fail "directed-cg should isolate both workers"
+ok "directed-cg pins the requested Builder and Reviewer"
+git -C "$DIRECTED_PROJECT" add swarmforge
+git -C "$DIRECTED_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -qm "configure directed swarm"
+cat > "$DIRECTED_BIN/herdr" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$DIRECTED_CALLS"
+case "${1-} ${2-}" in
+  "workspace create") printf '{"result":{"workspace_id":"ws-directed"}}\n' ;;
+  "workspace close") printf '{"result":{}}\n' ;;
+  "agent list") printf '{"result":{"agents":[]}}\n' ;;
+  "tab create") printf '{"result":{"tab_id":"tab-directed","pane_id":"pane-directed"}}\n' ;;
+  "agent start"|"agent prompt") printf '{"result":{}}\n' ;;
+  *) printf 'unexpected fake herdr call: %s\n' "$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$DIRECTED_BIN/herdr"
+OUT="$(cd "$DIRECTED_PROJECT" && \
+  PATH="$DIRECTED_BIN:$PATH" DIRECTED_CALLS="$DIRECTED_CALLS" \
+  "$TOOL_ROOT/bin/swarm" up 2>&1)"
+expect "directed launch: workers start" "Swarm is up: builder, reviewer" <<<"$OUT"
+expect "directed launch: router disabled" \
+  "handoffd disabled: directed workers receive only Director prompts." <<<"$OUT"
+[ ! -e "$DIRECTED_PROJECT/.swarmforge/daemon/handoffd.pid" ] \
+  || fail "directed launch started handoffd"
+grep -q 'This is directed mode' "$DIRECTED_CALLS" \
+  || fail "directed bootstrap did not explain direct coordination"
+grep -q 'You are read-only' "$DIRECTED_CALLS" \
+  || fail "directed reviewer bootstrap did not enforce read-only review"
+grep -q 'ready_for_next' "$DIRECTED_CALLS" \
+  && fail "directed bootstrap should not tell workers to poll the queue"
+ok "directed workers receive direct-only bootstrap prompts"
+OUT="$(cd "$DIRECTED_PROJECT" && "$TOOL_ROOT/bin/swarm" status)"
+expect "directed status: mode visible" "mode:    directed" <<<"$OUT"
+(cd "$DIRECTED_PROJECT" && \
+  PATH="$DIRECTED_BIN:$PATH" DIRECTED_CALLS="$DIRECTED_CALLS" \
+  "$TOOL_ROOT/bin/swarm" down >/dev/null)
+set +e
+OUT="$(cd "$DIRECTED_PROJECT" && "$TOOL_ROOT/bin/swarm" squad up 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "directed profile should refuse squad mode, got $STATUS"
+expect "directed profile: squad mode rejected" \
+  "Cannot start squad mode from a directed profile." <<<"$OUT"
+
 step "pack catalog is intentionally small and complete"
-EXPECTED_PACKS="$(printf '%s\n' adversaries four six six-all six-cg two | sort)"
+EXPECTED_PACKS="$(printf '%s\n' adversaries directed-cg four six six-all six-cg two | sort)"
 ACTUAL_PACKS="$(find "$TOOL_ROOT/packs" -maxdepth 1 -type f -name '*.conf' \
   -printf '%f\n' | sed 's/\.conf$//' | sort)"
 [ "$ACTUAL_PACKS" = "$EXPECTED_PACKS" ] \
-  || fail "pack catalog should contain only the six supported presets"
+  || fail "pack catalog should contain only the seven supported presets"
 for conf in "$TOOL_ROOT"/packs/*.conf; do
   pack="$(basename "$conf" .conf)"
   pack_project="$WORK/pack-$pack"
+  [ "$(grep -c '^# swarmforge-max-handoffs-per-task: [0-9][0-9]*$' "$conf")" -eq 1 ] \
+    || fail "$pack.conf must set exactly one numeric handoff budget"
   [ -f "$TOOL_ROOT/packs/$pack.prompt" ] \
     || fail "$pack.conf has no matching pack article"
   mkdir -p "$pack_project"
@@ -457,7 +539,7 @@ for conf in "$TOOL_ROOT"/packs/*.conf; do
     "$pack_project/swarmforge/constitution/articles/pack.prompt" >/dev/null \
     || fail "$pack article changed during init"
 done
-ok "exactly six packs have matching articles and survive initialization"
+ok "exactly seven packs have matching articles and survive initialization"
 
 DEFAULT_PACK_PROJECT="$WORK/default-pack"
 mkdir -p "$DEFAULT_PACK_PROJECT"
@@ -469,6 +551,141 @@ diff -q "$TOOL_ROOT/packs/six-cg.prompt" \
   "$DEFAULT_PACK_PROJECT/swarmforge/constitution/articles/pack.prompt" >/dev/null \
   || fail "bare swarm init should install the six-cg pack article"
 ok "bare swarm init defaults to six-cg"
+
+step "handoff guard persists duplicate and budget circuits across router runs"
+GUARD_PROJECT="$WORK/handoff-guard"
+GUARD_CLEANER="$WORK/handoff-guard-cleaner"
+mkdir -p "$GUARD_PROJECT/swarmforge" "$GUARD_PROJECT/.swarmforge"
+git -C "$GUARD_PROJECT" init -qb main
+printf 'one\n' > "$GUARD_PROJECT/guard.txt"
+git -C "$GUARD_PROJECT" add guard.txt
+git -C "$GUARD_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -qm "guard tree one"
+GUARD_ONE="$(git -C "$GUARD_PROJECT" rev-parse HEAD)"
+git -C "$GUARD_PROJECT" worktree add -qb guard-cleaner "$GUARD_CLEANER" main
+printf '# swarmforge-max-handoffs-per-task: 2\n' \
+  > "$GUARD_PROJECT/swarmforge/swarmforge.conf"
+printf 'coder\tmaster\t%s\tguard-coder\tcoder\tcodex\ttask\ncleaner\tcleaner\t%s\tguard-cleaner\tcleaner\tcodex\ttask\n' \
+  "$GUARD_PROJECT" "$GUARD_CLEANER" \
+  > "$GUARD_PROJECT/.swarmforge/roles.tsv"
+for guard_wt in "$GUARD_PROJECT" "$GUARD_CLEANER"; do
+  mkdir -p "$guard_wt/.swarmforge/handoffs/outbox" \
+           "$guard_wt/.swarmforge/handoffs/sent" \
+           "$guard_wt/.swarmforge/handoffs/failed" \
+           "$guard_wt/.swarmforge/handoffs/inbox/new"
+done
+cat > "$GUARD_PROJECT/.swarmforge/handoffs/outbox/001.handoff" <<EOF
+type: git_handoff
+from: coder
+to: cleaner
+priority: 50
+task: duplicate-task
+commit: $GUARD_ONE
+
+merge_and_process coder $GUARD_ONE
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+[ "$(find "$GUARD_CLEANER/.swarmforge/handoffs/inbox/new" -name '*.handoff' | wc -l)" -eq 1 ] \
+  || fail "guard setup should deliver its first Git tree"
+cat > "$GUARD_PROJECT/.swarmforge/handoffs/outbox/002.handoff" <<EOF
+type: git_handoff
+from: coder
+to: cleaner
+priority: 50
+task: duplicate-task
+commit: $GUARD_ONE
+
+merge_and_process coder $GUARD_ONE
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+[ "$(find "$GUARD_CLEANER/.swarmforge/handoffs/inbox/new" -name '*.handoff' | wc -l)" -eq 1 ] \
+  || fail "duplicate Git tree should not reach the recipient"
+grep -q 'HANDOFF_CIRCUIT_OPEN' \
+  "$GUARD_PROJECT/.swarmforge/handoffs/outbox/002.handoff.error" \
+  || fail "duplicate rejection should retain a circuit error"
+OUT="$(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard status)"
+expect "duplicate guard: durable open circuit visible" \
+  "GUARD_OPEN: task=duplicate-task deliveries=1" <<<"$OUT"
+mkdir -p "$GUARD_PROJECT/.swarmforge/daemon"
+printf '%s\n' "$$" > "$GUARD_PROJECT/.swarmforge/daemon/handoffd.pid"
+set +e
+OUT="$(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard reset duplicate-task 2>&1)"
+STATUS=$?
+set -e
+[ "$STATUS" -eq 1 ] || fail "live-router guard reset should exit 1, got $STATUS"
+expect "guard reset: live router rejected" \
+  "Stop handoffd before resetting a task circuit." <<<"$OUT"
+rm "$GUARD_PROJECT/.swarmforge/daemon/handoffd.pid"
+OUT="$(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard reset duplicate-task)"
+expect "guard reset: named task cleared" "GUARD_RESET: duplicate-task" <<<"$OUT"
+OUT="$(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard status)"
+expect "guard reset: ledger is clear" "GUARD_CLEAR" <<<"$OUT"
+
+printf 'two\n' >> "$GUARD_PROJECT/guard.txt"
+git -C "$GUARD_PROJECT" add guard.txt
+git -C "$GUARD_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -qm "guard tree two"
+GUARD_TWO="$(git -C "$GUARD_PROJECT" rev-parse HEAD)"
+printf 'three\n' >> "$GUARD_PROJECT/guard.txt"
+git -C "$GUARD_PROJECT" add guard.txt
+git -C "$GUARD_PROJECT" -c user.email=smoke@test -c user.name=smoke \
+  commit -qm "guard tree three"
+GUARD_THREE="$(git -C "$GUARD_PROJECT" rev-parse HEAD)"
+cat > "$GUARD_PROJECT/.swarmforge/handoffs/outbox/010.handoff" <<EOF
+type: git_handoff
+from: coder
+to: cleaner
+priority: 50
+task: budget-task
+commit: $GUARD_ONE
+
+merge_and_process coder $GUARD_ONE
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+cat > "$GUARD_CLEANER/.swarmforge/handoffs/outbox/011.handoff" <<EOF
+type: git_handoff
+from: cleaner
+to: coder
+priority: 50
+task: budget-task
+commit: $GUARD_TWO
+
+merge_and_process cleaner $GUARD_TWO
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+cat > "$GUARD_PROJECT/.swarmforge/handoffs/outbox/012.handoff" <<EOF
+type: git_handoff
+from: coder
+to: cleaner
+priority: 50
+task: budget-task
+commit: $GUARD_THREE
+
+merge_and_process coder $GUARD_THREE
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+grep -q 'exhausted its 2-handoff delivery budget' \
+  "$GUARD_PROJECT/.swarmforge/handoffs/outbox/012.handoff.error" \
+  || fail "third budget delivery should open the circuit"
+OUT="$(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard status)"
+expect "budget guard: count survives separate router processes" \
+  "GUARD_OPEN: task=budget-task deliveries=2" <<<"$OUT"
+NOTE_COUNT_BEFORE="$(find "$GUARD_CLEANER/.swarmforge/handoffs/inbox/new" -name '*.handoff' | wc -l)"
+cat > "$GUARD_PROJECT/.swarmforge/handoffs/outbox/013.handoff" <<'EOF'
+type: note
+from: coder
+to: cleaner
+priority: 50
+message: operator note
+
+The circuit must not suppress notes.
+EOF
+bb "$TOOL_ROOT/swarmforge/scripts/handoffd.bb" "$GUARD_PROJECT" --once
+NOTE_COUNT_AFTER="$(find "$GUARD_CLEANER/.swarmforge/handoffs/inbox/new" -name '*.handoff' | wc -l)"
+[ "$NOTE_COUNT_AFTER" -eq "$((NOTE_COUNT_BEFORE + 1))" ] \
+  || fail "open Git circuit should not suppress notes"
+ok "persistent guard bounds Git loops without suppressing notes"
+(cd "$GUARD_PROJECT" && "$TOOL_ROOT/bin/swarm" guard reset budget-task >/dev/null)
 
 step "Rust toolset writes a complete quality article"
 RUST_TOOLSET_PROJECT="$WORK/rust-toolset"

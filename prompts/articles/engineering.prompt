@@ -1,27 +1,32 @@
 # Article: Engineering
 
-## Test-first
+## Minimal sufficient execution
 
-For every behavior slice — the whole slice, not one assertion at a time —
-write focused tests before production code: tests that express the
-requested observable behavior and would fail under a plausible wrong
-implementation. That last clause is a criterion for choosing the test,
-not a demonstration to perform: red comes from the code not existing
-yet, never from breaking code that works. Do not construct wrong
-implementations to prove a test discriminates — that is mutation
-testing. Where the pack has a hardener, it owns that, run by tool over
-the whole slice; where the pack has a reviewer instead, the reviewer
-hunts for tests a wrong implementation would pass. Either way it is a
-later role's job, never the implementer's.
+Before editing, identify the accepted goal, non-goals, scope, and proof of
+completion. Implement the smallest change that satisfies them. Prefer an
+existing pattern over a new abstraction. Do not add frameworks, compatibility
+tracks, future-facing configuration, unrelated cleanup, or broad test
+infrastructure unless the accepted requirement proves it is necessary.
 
-Run the tests before you implement and confirm they fail for the reason
-you expect. A test that passes before the code exists is testing nothing,
-and a test written after the code encodes that code's bugs instead of the
-specification's intent.
+Stop when acceptance is proved. Green tests are evidence to finish, not a
+reason to expand the design.
 
-Then write the straightforward implementation those tests demand. The
-tests bound the scope; do not fake a pass and triangulate your way back
-to a real design.
+## Focused tests
+
+Run the relevant existing tests first. Add a test only when behavior changes
+and existing coverage cannot detect its regression, or when the task explicitly
+requires one. Cover the main path and, only when necessary, one key failure
+path. Do not introduce a test framework, broad matrix, large snapshot, or
+historical coverage project for the current slice.
+
+A new test must express accepted observable behavior and fail under a plausible
+wrong implementation. Confirm that failure before implementing when practical;
+never break working production code merely to demonstrate red. Mutation and
+adversarial test analysis belong to the later role assigned by the pack.
+
+Then write the straightforward implementation the requirement and tests demand.
+If the test is more convoluted than the behavior, simplify the test or the
+implementation.
 
 Never hand off work whose tests fail, and never weaken or delete a test to
 get to green; if a test is wrong, fixing it is part of the task and belongs
@@ -49,7 +54,8 @@ standard is Robert C. Martin's Clean Code tradition:
   queries answer questions, never both.
 - **SOLID**: one reason to change per class; extend by adding new
   handlers/strategies, not by branching inside old ones; small
-  role-shaped interfaces; dependencies point at abstractions.
+  role-shaped interfaces; dependencies point at abstractions. Apply these
+  only where the current change needs them; do not manufacture structure.
 - No duplication introduced by your change, no commented-out code, no
   debug leftovers. Boy Scout rule within your slice's scope.
 - Keep logic in testable modules; push OS, network, and UI edges behind
@@ -90,8 +96,9 @@ no such hook and the project wants attribution, end with exactly one
 is the only trailer: no Generated-By, no role tags. Projects that want
 no attribution at all say so in the project article.
 
-Commit only to your own worktree's branch; integration happens through
-handoffs, never through pushing to another role's branch.
+Commit only to your own worktree's branch. Pipeline integration happens through
+handoffs; directed builders report their SHA to the Director. Never push to
+another role's branch or a protected branch.
 
 ## Project specifics
 

@@ -1,29 +1,30 @@
 # swarm-forge-herdr — session guide
 
 Herdr-native port + extension of unclebob/swarm-forge: AI agent swarms
-with a validated handoff protocol. Two modes: **packs** (fixed pipelines:
-two/four/six/adversaries) and **squad** (persistent judgment-only leader,
+with bounded coordination. Three modes: **directed** (the user's Codex
+session directs one builder and one read-only reviewer), **packs** (fixed
+handoff pipelines), and **squad** (persistent judgment-only leader,
 transient contract-bound workers, deterministic advisor `squad_next`,
 daemon `squadd` that owns spawning/retiring/ALL merges, optional human
-approval gates). v1 + squad v2 are complete and validated live; PLAN.md
-is the authoritative history.
+approval gates). PLAN.md is the authoritative history.
 
 ## Map
 
 | Path | What |
 |---|---|
-| `bin/swarm` | Launcher/CLI (Babashka): init/switch/toolset/up/bootstrap/prompt/squad/logs/down/retire/status |
+| `bin/swarm` | Launcher/CLI (Babashka): init/switch/toolset/up/bootstrap/prompt/squad/logs/down/retire/status/guard |
 | `swarmforge/scripts/` | The runtime: `handoff_lib` (shared), ready/done helpers, `swarm_handoff` (outbound gate + contract enforcement), `handoffd` (router), `squad_*` (assign/worker/spawn_request/approval/theme/lib), `squad_next` (advisor), `squadd` (squad daemon) |
 | `prompts/` | SOURCE OF TRUTH for constitution, articles, role prompts, contracts, worker-common. Installed copies live in projects under `swarmforge/`; edit `prompts/` and sync both |
 | `packs/*.conf` + `*.prompt` | Pack presets + chain articles |
 | `toolsets/*.edn` | Quality-tool profiles keyed by purpose (dotnet, clojure, ruby, rust) |
-| `test/smoke.sh` | 375 checks; the executable spec. MUST be green before any commit |
-| `docs/` | Designs and specs: squad-v2/s3/s4, hardening S5-S7, agent profiles, quality bars, choosing-a-mode, pack retirement |
+| `skills/swarm-director/` | Versioned Codex skill: profile selection + bounded Director runbook |
+| `test/smoke.sh` | The executable spec. MUST be fully green before any commit |
+| `docs/` | Designs and specs: directed-cg, choosing-a-mode, squad v2/S3-S7, agent profiles, quality bars, pack retirement |
 | `AGENTS.md`, `CLAUDE.md` | Parallel session guides; keep their shared operational facts synchronized (Grok discovers both) |
 | `PLAN.md`, `PORTING.md` | History; upstream parity vs original work |
 
 Per-project runtime state (never committed): `.swarmforge/` — roles.tsv
-(routing truth), handoff queues, `squad/` records + events.log, daemon
+(routing truth), handoff queues, the task guard ledger, `squad/` records + events.log, daemon
 pids/logs. `.worktrees/` — one per role/worker.
 
 ## Invariants — do not break
@@ -40,6 +41,11 @@ pids/logs. `.worktrees/` — one per role/worker.
   rows 11-13, docs/squad-hardening-s5-spec.md row 14).
 - Contracts hard-block at `swarm_handoff`; workers inherit their
   template's contract.
+- Directed mode never starts `handoffd`: only the Director prompts workers,
+  reviewer is read-only, and a run gets at most one repair.
+- Fixed-pack Git handoffs have a durable task budget and same-tree/route
+  duplicate guard. An open circuit survives restarts; reset only the named
+  task with handoffd stopped after inspection.
 - herdr agent names: lowercase, ≤32 chars, project-prefixed
   (`project-agent-name` in bin/swarm; left-trim keeps the tail).
 - Upstream swarm-forge has NO license: never vendor its text; original
@@ -48,13 +54,14 @@ pids/logs. `.worktrees/` — one per role/worker.
 ## Operating swarms
 
 Run from a project root, inside a running `herdr`:
-`swarm up` (pack) / `swarm squad up`; `swarm prompt <role> "..."` sends
+`swarm up` (directed/pack) / `swarm squad up`; `swarm prompt <role> "..."` sends
 tasks; `swarm logs [n]` is the interleaved timeline (launcher + both
 daemons + squad events + handoff lifecycles). `swarm down` is a recoverable
 pause that retains pack worktrees and branches. After an approved terminal
 candidate is integrated, `swarm retire` performs guarded fixed-pack cleanup;
 it does not replace the daemon-owned squad lifecycle. Squad approvals:
-`swarm squad approvals|approve|deny|report`.
+`swarm squad approvals|approve|deny|report`. Circuit recovery:
+`swarm guard status`; stop handoffd, inspect, then `swarm guard reset <task>`.
 
 Verifying agent prompts landed: send only when the target is
 idle/done (herdr states); read the pane (`herdr agent read <name>`) if
@@ -63,9 +70,9 @@ pin `cd` explicitly (session cwd resets) and accept states idle OR done.
 
 ## Development workflow (this repo builds itself)
 
-- Swarm-built slices: adversaries pack in THIS repo (task to coder,
-  reviewer attacks; findings ride as gated tests). Start a project-root
-  coder only from a `review/<task>` branch, or use a review-gated preset
+- Swarm-built slices: prefer `directed-cg`; adversaries remains available when
+  a finding must ride back as a gated test, with one repair maximum. Start a
+  project-root coder only from a `review/<task>` branch, or use a review-gated preset
   whose coder has a linked worktree. The launcher refuses a project-root
   coder on `main` or `master`. Operator acts as integrator: independently
   re-verify every claim (rerun smoke, probe the feature), obtain the human

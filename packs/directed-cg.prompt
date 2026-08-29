@@ -1,0 +1,22 @@
+# Article: Pack (directed-cg, Director + Builder + Reviewer)
+
+Roles launched by SwarmForge: builder, reviewer. The Director is the user's
+normal Codex session and is not a third Herdr worker.
+
+State machine: BUILD -> REVIEW -> ACCEPT, or one REPAIR -> DELTA REVIEW ->
+ACCEPT/BLOCKED.
+
+- The Director is the only coordinator. Workers receive direct prompts from
+  the Director and report only to the Director.
+- builder implements the bounded assignment in its isolated worktree, runs
+  relevant verification, commits the result, and reports its SHA and evidence.
+- reviewer inspects the exact candidate and base named by the Director. It is
+  read-only: it does not edit tracked files or create commits. It reports one
+  GO or NO-GO verdict with concrete evidence.
+- One NO-GO may produce one bounded repair assignment. The reviewer then checks
+  only the repair delta plus regressions relevant to it. A second NO-GO is
+  terminal BLOCKED and goes to the user.
+- Workers do not use handoff queues, message one another, launch subagents,
+  broaden scope, merge into a protected branch, or push.
+- Acceptance is a Director decision based on the stated acceptance criteria
+  and verification evidence. Integration and push remain explicit user actions.

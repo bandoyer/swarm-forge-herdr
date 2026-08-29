@@ -79,31 +79,64 @@
   (spit (str path ".error") (str reason "\n"))
   (archive! path (fs/path (fs/parent (fs/parent path)) "failed")))
 
+(defn commit-tree [worktree-path commit]
+  (let [{:keys [exit out err]}
+        (process/sh {:continue true}
+                    "git" "-C" worktree-path "rev-parse"
+                    (str commit "^{tree}"))]
+    (when-not (zero? exit)
+      (throw (ex-info (str "cannot resolve Git tree for " commit ": "
+                           (str/trim (str out "\n" err))) {})))
+    (str/trim out)))
+
 (defn deliver! [roles sender-role path]
   (let [{:keys [headers body]} (handoff-lib/parse-handoff path)
-        recipients (some-> (get headers "to") (str/split #",") seq)]
+        recipients (some-> (get headers "to") (str/split #",") seq)
+        recipient-info (when recipients
+                         (into {}
+                               (for [recipient recipients]
+                                 [recipient
+                                  (or (get roles recipient)
+                                      (throw (ex-info
+                                              (str "unknown recipient " recipient)
+                                              {})))])))
+        git-handoff? (= "git_handoff" (get headers "type"))
+        task (get headers "task")
+        tree (when git-handoff?
+               (commit-tree (get-in roles [sender-role :worktree-path])
+                            (get headers "commit")))
+        guard-reason (when git-handoff?
+                       (handoff-lib/handoff-guard-block-reason
+                        project-root task sender-role recipients tree))]
     (if-not recipients
       (fail! path "missing to header")
-      (do
-        (doseq [recipient recipients]
-          (let [info (or (get roles recipient)
-                         (throw (ex-info (str "unknown recipient " recipient) {})))
-                target (fs/path (:worktree-path info)
-                                ".swarmforge" "handoffs" "inbox" "new" (fs/file-name path))]
-            (fs/create-dirs (fs/parent target))
-            ;; Retry-safe: an already-delivered copy is left untouched.
-            (when-not (fs/exists? target)
-              (spit (str target)
-                    (str (handoff-lib/render-handoff
-                          {:headers (assoc headers
-                                           "recipient" recipient
-                                           "enqueued_at" (handoff-lib/iso-now))
-                           :body body})
-                         "\n")))
-            (wake! (:agent-name info))))
-        (archive! path (fs/path (get-in roles [sender-role :worktree-path])
-                                ".swarmforge" "handoffs" "sent"))
-        (log! "delivered" (str path))))))
+      (if guard-reason
+        (let [reason (str "HANDOFF_CIRCUIT_OPEN: " guard-reason)]
+          (handoff-lib/open-handoff-circuit! project-root task guard-reason)
+          (log! "circuit-open" (str "task=" task) reason)
+          (fail! path reason))
+        (do
+          (doseq [recipient recipients]
+            (let [info (get recipient-info recipient)
+                  target (fs/path (:worktree-path info)
+                                  ".swarmforge" "handoffs" "inbox" "new" (fs/file-name path))]
+              (fs/create-dirs (fs/parent target))
+              ;; Retry-safe: an already-delivered copy is left untouched.
+              (when-not (fs/exists? target)
+                (spit (str target)
+                      (str (handoff-lib/render-handoff
+                            {:headers (assoc headers
+                                             "recipient" recipient
+                                             "enqueued_at" (handoff-lib/iso-now))
+                             :body body})
+                           "\n")))
+              (wake! (:agent-name info))))
+          (archive! path (fs/path (get-in roles [sender-role :worktree-path])
+                                  ".swarmforge" "handoffs" "sent"))
+          (when git-handoff?
+            (handoff-lib/record-handoff-delivery!
+             project-root task sender-role recipients tree))
+          (log! "delivered" (str path)))))))
 
 ;; --- poll loop ------------------------------------------------------------
 

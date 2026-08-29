@@ -21,9 +21,9 @@ routes back to specifier and the chain runs again.
   contradicts the specification or specified behavior with no test, goes
   back to specifier as a git_handoff carrying the qa commit; that handoff
   continues the chain, and specifier slices the finding into new work.
-- Routing back is bounded: at most two findings per task name. When a
-  third verification of the same task fails, qa stops and puts the
-  situation to the user instead of sending the slice round again.
+- Routing back is bounded: the first finding authorizes one repair pass.
+  If verification fails again, qa stops and puts the situation to the user
+  instead of sending the slice round a second time.
 - A passing verification is TERMINAL for implementation. Qa sends the
   completion git_handoff to specifier,coder,cleaner,architect,hardener;
   each recipient merges it and stops.

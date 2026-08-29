@@ -21,8 +21,10 @@ location are preserved so upstream role prompts run unmodified.
 | `SWARMFORGE_WAKE_CMD` | n/a | override/disable wake command | testability |
 | Role spelling | `hardender` | `hardener` | upstream typo |
 | Agent selection | `codex` default | explicit per pack role or squad profile | supports stock Codex and mixed-provider packs plus independently configured squad workers |
+| Loop limit | prompt discipline only | persistent per-task budget + same-tree/route circuit | a bad prompt cannot route Git work forever |
+| Directed workflow | n/a | Director prompts an isolated builder and read-only reviewer; router off | independent review without a fixed-pipeline ceremony |
 
-## What agents see (unchanged)
+## What pipeline agents see (unchanged)
 
 - `SWARMFORGE_ROLE` set in their pane environment
 - scripts at `swarmforge/scripts/` inside their worktree
@@ -38,7 +40,9 @@ project-scoped agent naming (S2), the deterministic advisor + sole-git-
 owner daemon (S3), human approval gates with CLI + notifications (S4),
 dead-worker reconciliation (S5), durable worker provider selection (S6),
 daemon-owned transition gates and a leader write boundary (S7), and pinned
-squad model-and-effort profiles. Upstream's squad branch inspired S2–S4;
+squad model-and-effort profiles. The Director-led `directed-cg` profile and
+durable fixed-pack circuit breaker are also original here. Upstream's squad
+branch inspired S2–S4;
 the contract enforcement, approval gating, worker contract inheritance,
 and later hardening are original here. The upstream squad features
 deliberately not ported are module maps, implementation-order gating,

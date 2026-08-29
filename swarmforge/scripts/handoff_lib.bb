@@ -239,6 +239,129 @@
     (spit (str tmp) content)
     (fs/move tmp file {:replace-existing true})))
 
+;; ---------------------------------------------------------------------------
+;; Fixed-pack circuit breaker
+;;
+;; Prompt-level loop limits are advice. The router also keeps a durable,
+;; task-scoped count and the Git trees already delivered on each route. The
+;; state lives at the project root, survives daemon restarts, and never changes
+;; a worktree or branch. `swarm guard reset <task>` is the explicit recovery
+;; path after an operator has inspected an open circuit.
+
+(def default-max-handoffs-per-task 12)
+
+(defn max-handoffs-per-task
+  "Configured fixed-pack delivery budget, or the safe default of 12. The
+  marker is a comment so swarmforge.conf remains upstream-compatible."
+  [root]
+  (let [conf (fs/path root "swarmforge" "swarmforge.conf")
+        lines (if (fs/exists? conf) (str/split-lines (slurp (str conf))) [])
+        marked (filter #(re-find #"^\s*#\s*swarmforge-max-handoffs-per-task:"
+                                 %)
+                       lines)]
+    (when (> (count marked) 1)
+      (die 2 "INVALID_HANDOFF_BUDGET: swarmforge.conf contains more than one swarmforge-max-handoffs-per-task marker."))
+    (if-let [line (first marked)]
+      (if-let [[_ raw] (re-matches
+                        #"^\s*#\s*swarmforge-max-handoffs-per-task:\s*(\d+)\s*$"
+                        line)]
+        (or (parse-long raw)
+            (die 2 (str "INVALID_HANDOFF_BUDGET: value is too large: " raw)))
+        (die 2 (str "INVALID_HANDOFF_BUDGET: expected '# swarmforge-max-handoffs-per-task: N', got: "
+                    (str/trim line))))
+      default-max-handoffs-per-task)))
+
+(defn handoff-guard-file [root]
+  (fs/path root ".swarmforge" "daemon" "handoff-guard.edn"))
+
+(defn read-handoff-guard-state
+  "Read the durable guard ledger. Missing state is an empty v1 ledger."
+  [root]
+  (let [file (handoff-guard-file root)]
+    (if-not (fs/exists? file)
+      {:version 1 :tasks {}}
+      (let [state (try
+                    (edn/read-string (slurp (str file)))
+                    (catch Exception e
+                      (die 2 (str "HANDOFF_GUARD_INVALID: " (ex-message e)))))]
+        (when-not (and (map? state) (= 1 (:version state)) (map? (:tasks state)))
+          (die 2 "HANDOFF_GUARD_INVALID: expected {:version 1 :tasks {...}}."))
+        state))))
+
+(defn- write-handoff-guard-state! [root state]
+  (let [file (handoff-guard-file root)]
+    (fs/create-dirs (fs/parent file))
+    (atomic-write! file (str (pr-str state) "\n"))))
+
+(defn- handoff-fingerprint [sender recipients tree]
+  (pr-str [sender (vec (sort recipients)) tree]))
+
+(defn handoff-guard-block-reason
+  "Return the reason a git handoff must not be delivered, or nil."
+  [root task sender recipients tree]
+  (let [limit (max-handoffs-per-task root)
+        entry (get-in (read-handoff-guard-state root) [:tasks task]
+                      {:deliveries 0 :seen #{}})
+        fingerprint (handoff-fingerprint sender recipients tree)]
+    (cond
+      (:circuit-open entry)
+      (or (:reason entry) (str "task '" task "' circuit is open"))
+
+      (contains? (:seen entry #{}) fingerprint)
+      (str "task '" task "' repeated the same Git tree on route "
+           sender " -> " (str/join "," (sort recipients)))
+
+      (>= (:deliveries entry 0) limit)
+      (str "task '" task "' exhausted its " limit "-handoff delivery budget")
+
+      :else nil)))
+
+(defn open-handoff-circuit!
+  "Persist an open circuit without discarding prior delivery evidence."
+  [root task reason]
+  (let [state (read-handoff-guard-state root)
+        entry (get-in state [:tasks task] {:deliveries 0 :seen #{}})
+        updated (assoc-in state [:tasks task]
+                          (assoc entry
+                                 :circuit-open true
+                                 :reason reason
+                                 :updated-at (iso-now)))]
+    (write-handoff-guard-state! root updated)
+    (get-in updated [:tasks task])))
+
+(defn record-handoff-delivery!
+  "Record one successful git-handoff delivery."
+  [root task sender recipients tree]
+  (let [state (read-handoff-guard-state root)
+        entry (get-in state [:tasks task] {:deliveries 0 :seen #{}})
+        fingerprint (handoff-fingerprint sender recipients tree)
+        updated-entry (-> entry
+                          (update :deliveries (fnil inc 0))
+                          (update :seen (fnil conj #{}) fingerprint)
+                          (assoc :updated-at (iso-now)))
+        updated (assoc-in state [:tasks task] updated-entry)]
+    (write-handoff-guard-state! root updated)
+    updated-entry))
+
+(defn reset-handoff-guard!
+  "Remove one task from the guard ledger. Returns true when it existed."
+  [root task]
+  (let [state (read-handoff-guard-state root)
+        existed? (contains? (:tasks state) task)]
+    (when existed?
+      (write-handoff-guard-state! root (update state :tasks dissoc task)))
+    existed?))
+
+(defn open-handoff-circuits
+  "Open circuit records sorted by task name."
+  [root]
+  (->> (:tasks (read-handoff-guard-state root))
+       (keep (fn [[task entry]]
+               (when (:circuit-open entry)
+                 (assoc entry :task task))))
+       (sort-by :task)
+       vec))
+
 (defn set-header!
   "Set one header in place, preserving the original header text order (new
   headers append to the end of the header block)."

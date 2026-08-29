@@ -153,9 +153,33 @@ Implemented hardening and remaining work:
 - [ ] S8 atomic records + stale sequence.lock recovery
 - [x] Consolidate the experimental pack matrix into `six-all` and `six-cg`.
 
+## Phase 7 — Directed workflow + loop bounds ✅
+
+Done 2026-08-29:
+
+- [x] `directed-cg`: the user's Codex session is Director; Grok 4.6 High
+      builds and Codex Sol Max reviews read-only in isolated worktrees.
+      `handoffd` is disabled and one repair is the hard workflow limit.
+- [x] `skills/swarm-director`: task-informed selection among solo,
+      directed, fixed evidence packs, and squad; a directed run has a
+      90-minute default wall budget and stops workers at every terminal state.
+- [x] Fixed-pack circuit breaker: durable per-task delivery budgets,
+      same-tree/route duplicate rejection, visible status, and explicit
+      stopped-router reset. Notes remain outside the Git delivery budget.
+- [x] Shared prompts prefer minimal sufficient execution and focused tests;
+      six/adversaries feedback is bounded to one repair.
+- [x] Headless smoke suite expanded to 389 checks. `six-cg` remains the bare
+      `swarm init` default.
+
+`swarmd` is deliberately not part of this phase. Revisit that design only
+after directed runs produce enough real evidence to justify another service.
+
 ## Decisions log
 
 - 2026-08-15: MIT license; Babashka runtime; packs as presets not branches;
   original prompts + upstream import script (upstream has no LICENSE).
 - 2026-08-29: bare `swarm init` defaults to the isolated Codex + Grok
   `six-cg` pack; `six-all` remains the Fable + Codex + Grok alternative.
+- 2026-08-29: normal one-slice swarm recommendation is Director-led
+  `directed-cg`; fixed packs retain deterministic handoffs but cannot loop
+  without a persistent delivery circuit opening.
